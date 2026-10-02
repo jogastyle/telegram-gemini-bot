@@ -16,22 +16,16 @@ def handle(message):
     try:
         response = client.chat.completions.create(
             messages=[{"role": "user", "content": message.text}],
-            model="llama-3.1-8b-instant",
+            model="openai/gpt-oss-20b",  # नया मॉडल
         )
         bot.reply_to(message, response.choices[0].message.content)
     except Exception as e:
-        try:
-            bot.reply_to(message, "Error: " + str(e))
-        except:
-            pass
+        bot.reply_to(message, "Error: " + str(e))
 
 @app.route('/', methods=['POST'])
 def webhook():
-    try:
-        update = telebot.types.Update.de_json(request.stream.read().decode('utf-8'))
-        bot.process_new_updates([update])
-    except Exception as e:
-        print("WEBHOOK ERROR:", str(e))
+    update = telebot.types.Update.de_json(request.stream.read().decode('utf-8'))
+    bot.process_new_updates([update])
     return "OK", 200
 
 @app.route('/', methods=['GET'])
