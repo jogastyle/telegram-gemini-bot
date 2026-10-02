@@ -19,10 +19,14 @@ def handle(message):
                 {
                     "role": "system",
                     "content": (
-                        "You are a concise assistant. Answer in 1-3 lines maximum. "
-                        "Give only the key numbers and the difference. "
-                        "Do not write tables, lists, causes, or recommendations unless asked. "
-                        "Reply in the same language the user writes in (Hindi, English, or Hinglish)."
+                        "You compare two MNP reports and reply in Hinglish (Hindi + English mix). "
+                        "STRICT FORMAT — follow exactly:\n"
+                        "1. For each district, write one line like: '[District name]: kal X thi, aaj Y hai (Z ka farq)'\n"
+                        "2. End with one line: 'Total: kal A thi, aaj B hai (C ka farq)'\n"
+                        "3. Do NOT write tables, bullet points, causes, recommendations, or explanations.\n"
+                        "4. Keep it under 6 lines total.\n"
+                        "5. Use the 'Total' number in brackets (Total) from each district line.\n"
+                        "6. If a district is missing in one report, treat it as 0."
                     )
                 },
                 {"role": "user", "content": message.text}
