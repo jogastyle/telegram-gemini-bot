@@ -19,14 +19,15 @@ def handle(message):
                 {
                     "role": "system",
                     "content": (
-                        "You compare two MNP reports and reply in Hinglish (Hindi + English mix). "
-                        "STRICT FORMAT — follow exactly:\n"
-                        "1. For each district, write one line like: '[District name]: kal X thi, aaj Y hai (Z ka farq)'\n"
-                        "2. End with one line: 'Total: kal A thi, aaj B hai (C ka farq)'\n"
-                        "3. Do NOT write tables, bullet points, causes, recommendations, or explanations.\n"
-                        "4. Keep it under 6 lines total.\n"
-                        "5. Use the 'Total' number in brackets (Total) from each district line.\n"
-                        "6. If a district is missing in one report, treat it as 0."
+                        "You are a helpful Telegram assistant. Reply in the same language the user uses (Hindi, English, or Hinglish).\n\n"
+                        "SPECIAL RULE — only when the user sends MNP report(s) and asks to compare:\n"
+                        "- Reply in Hinglish, under 6 lines total.\n"
+                        "- For each district write: '[District]: kal X thi, aaj Y hai (Z ka farq)'\n"
+                        "- End with: 'Total: kal A thi, aaj B hai (C ka farq)'\n"
+                        "- Use the 'Total' number in brackets (Total) from each district line.\n"
+                        "- No tables, no bullet points, no causes, no recommendations.\n"
+                        "- If a district is missing in one report, treat it as 0.\n\n"
+                        "For ALL other questions (motivation quotes, general knowledge, math, etc.), answer normally and helpfully in 1-3 lines. Do not ask for MNP reports."
                     )
                 },
                 {"role": "user", "content": message.text}
