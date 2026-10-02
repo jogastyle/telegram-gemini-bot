@@ -1,22 +1,24 @@
 import os
 import telebot
-import google.generativeai as genai
+from groq import Groq
 from flask import Flask, request
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-GEMINI_KEY = os.environ.get("GEMINI_KEY")
+GROQ_KEY = os.environ.get("GROQ_KEY")
 
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
-genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel('gemini-3.8-flash')
+client = Groq(api_key=GROQ_KEY)
 
 app = Flask(__name__)
 
 @bot.message_handler(func=lambda m: True)
 def handle(message):
     try:
-        response = model.generate_content(message.text)
-        bot.reply_to(message, response.text)
+        response = client.chat.completions.create(
+            messages=[{"role": "user", "content": message.text}],
+            model="llama-3.3-70b-versatile",
+        )
+        bot.reply_to(message, response.choices[0].message.content)
     except Exception as e:
         try:
             bot.reply_to(message, "Error: " + str(e))
@@ -38,4 +40,4 @@ def index():
 
 @app.route('/test', methods=['GET'])
 def test():
-    return "Token: " + ("SET" if BOT_TOKEN else "MISSING") + ", Gemini: " + ("SET" if GEMINI_KEY else "MISSING")
+    return "Token: " + ("SET" if BOT_TOKEN else "MISSING") + ", Groq: " + ("SET" if GROQ_KEY else "MISSING")
