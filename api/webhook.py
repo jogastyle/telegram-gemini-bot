@@ -1,4 +1,5 @@
 import os
+import time
 import telebot
 from groq import Groq
 from flask import Flask, request
@@ -19,6 +20,11 @@ app = Flask(__name__)
 @app.route('/daily-quote', methods=['GET'])
 def daily_quote():
     try:
+        # Message 1: Good Morning
+        bot.send_message(GROUP_CHAT_ID, "🌅 Good Morning Sir & Team")
+        time.sleep(1)
+
+        # Message 2: Work-related motivation quote
         response = client.chat.completions.create(
             messages=[
                 {
@@ -34,9 +40,9 @@ def daily_quote():
             model="openai/gpt-oss-20b",
         )
         quote = response.choices[0].message.content.strip()
-        final_message = "🌅 Good Morning Sir & Team\n\n" + quote
-        bot.send_message(GROUP_CHAT_ID, final_message)
-        return "Sent: " + final_message, 200
+        bot.send_message(GROUP_CHAT_ID, "💪 " + quote)
+
+        return "Sent both messages", 200
     except Exception as e:
         return "Error: " + str(e), 500
 
