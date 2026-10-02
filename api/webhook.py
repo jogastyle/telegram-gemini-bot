@@ -1,4 +1,3 @@
-
 import os
 import telebot
 from groq import Groq
@@ -6,7 +5,9 @@ from flask import Flask, request
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 GROQ_KEY = os.environ.get("GROQ_KEY")
-GROUP_CHAT_ID = os.environ.get("GROUP_CHAT_ID")
+
+# Group Chat ID — direct yahan daal diya
+GROUP_CHAT_ID = "-1004368616206"
 
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 client = Groq(api_key=GROQ_KEY)
@@ -20,14 +21,22 @@ def daily_quote():
     try:
         response = client.chat.completions.create(
             messages=[
-                {"role": "system", "content": "Generate one short work-related motivational quote in Hindi (Devanagari script only). Just the quote, no extra text."},
-                {"role": "user", "content": "Give me a new motivational quote for the day."}
+                {
+                    "role": "system",
+                    "content": (
+                        "Generate ONE short work-related motivational quote in Hindi (Devanagari script only). "
+                        "It must be about work, effort, teamwork, or success. "
+                        "Just the quote — no greeting, no extra text, no author name."
+                    )
+                },
+                {"role": "user", "content": "Give me a new work motivational quote for today."}
             ],
             model="openai/gpt-oss-20b",
         )
         quote = response.choices[0].message.content.strip()
-        bot.send_message(GROUP_CHAT_ID, "🌅 " + quote)
-        return "Sent: " + quote, 200
+        final_message = "🌅 Good Morning Sir & Team\n\n" + quote
+        bot.send_message(GROUP_CHAT_ID, final_message)
+        return "Sent: " + final_message, 200
     except Exception as e:
         return "Error: " + str(e), 500
 
@@ -38,11 +47,15 @@ def handle(message):
         text = message.text or ""
         is_tagged = BOT_USERNAME.lower() in text.lower()
 
-        # group mein sirf tag par reply, DM mein hamesha reply
-        if not is_private and not is_tagged:
+        is_reply_to_bot = False
+        if message.reply_to_message and message.reply_to_message.from_user:
+            replied_user = message.reply_to_message.from_user
+            if replied_user.is_bot and replied_user.username == BOT_USERNAME.replace("@", ""):
+                is_reply_to_bot = True
+
+        if not is_private and not is_tagged and not is_reply_to_bot:
             return
 
-        # tag hata do taaki AI ko saaf sawal mile
         clean_text = text.replace(BOT_USERNAME, "").strip()
         if not clean_text:
             clean_text = "Hi"
@@ -89,4 +102,4 @@ def index():
 
 @app.route('/test', methods=['GET'])
 def test():
-    return "Token: " + ("SET" if BOT_TOKEN else "MISSING") + ", Groq: " + ("SET" if GROQ_KEY else "MISSING") + ", Group: " + ("SET" if GROUP_CHAT_ID else "MISSING")
+    return "Token: " + ("SET" if BOT_TOKEN else "MISSING") + ", Groq: " + ("SET" if GROQ_KEY else "MISSING") + ", Group: " + GROUP_CHAT_ID
