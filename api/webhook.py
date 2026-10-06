@@ -68,6 +68,8 @@ def parse_report(text):
 def save_report(text, timestamp):
     try:
         parsed = parse_report(text)
+        if not parsed:
+            return  # only save MNP reports
         db = get_db()
         db.insert_one({
             "text": text,
@@ -78,7 +80,7 @@ def save_report(text, timestamp):
     except Exception as e:
         print("DB SAVE ERROR:", str(e))
 
-# ================= COMPARE (pure Python) =================
+# ================= COMPARE =================
 def format_comparison(r_old, r_new, label_old="Pehle", label_new="Ab"):
     p_old = r_old.get("parsed") or parse_report(r_old.get("text", ""))
     p_new = r_new.get("parsed") or parse_report(r_new.get("text", ""))
@@ -112,9 +114,12 @@ def build_weekly_summary():
     now = datetime.now()
     week_ago = now - timedelta(days=7)
     db = get_db()
-    reports = list(db.find({"timestamp": {"$gte": week_ago.timestamp()}}).sort("timestamp", 1))
+    reports = list(db.find({
+        "timestamp": {"$gte": week_ago.timestamp()},
+        "text": {"$regex": "FTA MNP|FTD"}
+    }).sort("timestamp", 1))
     if not reports:
-        return "Is hafte koi report save nahi hui."
+        return "Is hafte koi MNP report save nahi hui."
 
     daily_last = {}
     for r in reports:
@@ -154,7 +159,7 @@ def build_weekly_summary():
 
     return "\n".join(lines)
 
-# ================= TIME/DATE PARSING =================
+# ================= DATE/TIME PARSING =================
 MONTHS = {
     "jan":1,"january":1,"feb":2,"february":2,"mar":3,"march":3,"apr":4,"april":4,
     "may":5,"jun":6,"june":6,"jul":7,"july":7,"aug":8,"august":8,
@@ -162,20 +167,53 @@ MONTHS = {
     "dec":12,"december":12,
 }
 
-def extract_time(text, keywords):
+def extract_time(text):
+    """Extract hour:minute with AM/PM keyword support.
+       Returns (hour_24, minute) or None."""
     lower = text.lower()
-    for kw in keywords:
-        idx = lower.find(kw)
-        if idx == -1:
-            continue
-        window = lower[idx:idx+40]
-        m = re.search(r'(\d{1,2})[:\.](\d{2})', window)
-        if m:
-            return int(m.group(1)), int(m.group(2))
-        m = re.search(r'(\d{1,2})\s*(?:baje|bje|pm|am)', window)
-        if m:
-            return int(m.group(1)), 0
+
+    # Try HH:MM format first
+    m = re.search(r'(\d{1,2})[:\.](\d{2})', lower)
+    if m:
+        h = int(m.group(1))
+        mi = int(m.group(2))
+        return apply_ampm(lower, m.start(), h), mi
+
+    # Try "N baje" / "N bje" / "N pm" / "N am"
+    m = re.search(r'(\d{1,2})\s*(?:baje|bje|pm|am|bajkar)', lower)
+    if m:
+        h = int(m.group(1))
+        return apply_ampm(lower, m.start(), h), 0
+
     return None
+
+def apply_ampm(text, idx, hour):
+    """Convert 12-hour time to 24-hour based on Hindi keywords around it."""
+    if hour >= 13:
+        return hour  # already 24h or invalid
+    if hour == 12:
+        # 12 baje - depends on context
+        context = text[max(0, idx - 20):idx + 30]
+        if re.search(r'raat|night', context):
+            return 0  # 12 AM = 00:00
+        return 12  # 12 PM
+
+    context = text[max(0, idx - 20):idx + 30]
+    # Morning keywords
+    if re.search(r'subah|subha|saver|savere|morning|\bam\b', context):
+        return hour  # 8 subah = 08:00
+    # Afternoon
+    if re.search(r'dophar|dopahar|dopaher|afternoon', context):
+        return hour + 12 if hour < 12 else hour  # 2 dophar = 14:00
+    # Evening
+    if re.search(r'shaam|sham|evening', context):
+        return hour + 12 if hour < 12 else hour  # 6 shaam = 18:00
+    # Night
+    if re.search(r'raat|night|\bpm\b', context):
+        return hour + 12 if hour < 12 else hour  # 8 raat = 20:00
+
+    # No keyword - assume 24h if hour > 12, else treat as-is
+    return hour
 
 def extract_date(text):
     lower = text.lower()
@@ -186,6 +224,7 @@ def extract_date(text):
         return today
     if re.search(r'\bparso\b', lower):
         return today - timedelta(days=2)
+
     m = re.search(r'(\d{1,2})\s*(?:st|nd|rd|th)?\s*([a-z]+)', lower)
     if m:
         day = int(m.group(1)); mon = m.group(2)
@@ -196,6 +235,7 @@ def extract_date(text):
                     c = datetime(today.year - 1, MONTHS[mon], day).date()
                 return c
             except: pass
+
     m = re.search(r'(\d{1,2})[\/\-\.](\d{1,2})', lower)
     if m:
         d, mo = int(m.group(1)), int(m.group(2))
@@ -205,17 +245,27 @@ def extract_date(text):
                 c = datetime(today.year - 1, mo, d).date()
             return c
         except: pass
+
     return None
 
 def find_report_at(target_date, hour, minute):
-    start = datetime.combine(target_date, datetime.min.time()).timestamp()
-    end = start + 86400
-    db = get_db()
-    reports = list(db.find({"timestamp": {"$gte": start, "$lt": end}}).sort("timestamp", 1))
-    if not reports:
+    """Sirf MNP reports mein se closest match dhundo."""
+    try:
+        start = datetime.combine(target_date, datetime.min.time()).timestamp()
+        end = start + 86400
+        db = get_db()
+        # Only MNP reports
+        reports = list(db.find({
+            "timestamp": {"$gte": start, "$lt": end},
+            "text": {"$regex": "FTA MNP|FTD"}
+        }).sort("timestamp", 1))
+        if not reports:
+            return None
+        target_ts = datetime.combine(target_date, datetime.min.time().replace(hour=hour, minute=minute)).timestamp()
+        return min(reports, key=lambda r: abs(r["timestamp"] - target_ts))
+    except Exception as e:
+        print("FIND ERROR:", str(e))
         return None
-    target_ts = datetime.combine(target_date, datetime.min.time().replace(hour=hour, minute=minute)).timestamp()
-    return min(reports, key=lambda r: abs(r["timestamp"] - target_ts))
 
 # ================= DAILY QUOTE =================
 @app.route('/daily-quote', methods=['GET'])
@@ -283,7 +333,7 @@ def handle(message):
         clean_text = text.replace(BOT_USERNAME, "").strip() or "Hi"
         lower = clean_text.lower()
 
-        # Weekly summary by tag
+        # Weekly summary
         if "weekly" in lower or "hafte ka summary" in lower or "hafte ki summary" in lower:
             bot.reply_to(message, build_weekly_summary())
             return
@@ -294,10 +344,10 @@ def handle(message):
             parts = re.split(r'\baur\b|\band\b|\bvs\b|\bse\b', lower)
             anchors = []
             for part in parts:
-                t = extract_time(part, ["baje","bje",":",".","pm","am","dophar","subah","shaam","raat"])
+                t = extract_time(part)
                 d = extract_date(part)
                 if t or d:
-                    anchors.append((d, t))
+                    anchors.append((d, t, part.strip()))
 
             if len(anchors) >= 2:
                 a1, a2 = anchors[0], anchors[1]
@@ -310,10 +360,10 @@ def handle(message):
                 r2 = find_report_at(d2, t2[0], t2[1])
 
                 if not r1:
-                    bot.reply_to(message, f"{d1.strftime('%d %b')} {t1[0]}:{t1[1]:02d} ke aas-paas report nahi mili.")
+                    bot.reply_to(message, f"{d1.strftime('%d %b')} {t1[0]:02d}:{t1[1]:02d} ke aas-paas koi MNP report nahi mili.")
                     return
                 if not r2:
-                    bot.reply_to(message, f"{d2.strftime('%d %b')} {t2[0]}:{t2[1]:02d} ke aas-paas report nahi mili.")
+                    bot.reply_to(message, f"{d2.strftime('%d %b')} {t2[0]:02d}:{t2[1]:02d} ke aas-paas koi MNP report nahi mili.")
                     return
 
                 label_old = f"{d1.strftime('%d %b')} {t1[0]:02d}:{t1[1]:02d}"
@@ -321,15 +371,17 @@ def handle(message):
                 bot.reply_to(message, format_comparison(r1, r2, label_old, label_new))
                 return
 
-            # Fallback: last two
+            # Fallback: last two MNP reports
             db = get_db()
-            last_two = list(db.find().sort("timestamp", -1).limit(2))
+            last_two = list(db.find({
+                "text": {"$regex": "FTA MNP|FTD"}
+            }).sort("timestamp", -1).limit(2))
             if len(last_two) >= 2:
                 r1, r2 = last_two[1], last_two[0]
                 bot.reply_to(message, format_comparison(r1, r2))
                 return
             else:
-                bot.reply_to(message, "Database mein kam se kam 2 reports chahiye.")
+                bot.reply_to(message, "Database mein kam se kam 2 MNP reports chahiye. Abhi " + str(len(last_two)) + " hai.")
                 return
 
         # Normal AI reply
