@@ -231,18 +231,21 @@ def weekly_sum():
     d = daily_data(7)
     dt = d["dist_totals"]
     dts = {d["labels"][i]: d["total"][i] for i in range(len(d["labels"]))}
-    gt = sum(dts.values())
-    lines = ["Weekly MNP Summary", "(Last 7 days)", "", "Distributor-wise total:"]
-    for n, v in sorted(dt.items(), key=lambda x: -x[1]):
-        lines.append(f"{n}: {v}")
+    u_total = dt.get("Uday Comm Agr", 0)
+    m_total = dt.get("Maa Vaishno Telecom", 0)
+    grand = u_total + m_total
+    lines = ["📊 Weekly MNP Summary", "(Last 7 days)", "", "Distributor-wise:"]
+    lines.append(f"🔵 Uday Comm Agr: {u_total}")
+    lines.append(f"🔴 Maa Vaishno Telecom: {m_total}")
     lines.append("")
-    lines.append(f"Grand Total: {gt}")
+    lines.append(f"🎯 Total (dono milakar): {grand}")
     nz = {k: v for k, v in dts.items() if v > 0}
     if nz:
         b = max(nz.items(), key=lambda x: x[1])
         w = min(nz.items(), key=lambda x: x[1])
-        lines.append(f"Best day: {b[0]} ({b[1]})")
-        lines.append(f"Lowest: {w[0]} ({w[1]})")
+        lines.append("")
+        lines.append(f"🏆 Best day: {b[0]} ({b[1]})")
+        lines.append(f"📉 Lowest: {w[0]} ({w[1]})")
     return "\n".join(lines)
     
 
