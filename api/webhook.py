@@ -370,62 +370,92 @@ def find_report_at(target_date, hour, minute):
         print("FIND ERROR:", str(e))
         return None
 
-@app.route('/check-performance', methods=['GET'])
-def check_performance():
-    try:
-        settings = get_settings()
-        target_uday = settings.get("target_uday", 0)
-        target_mv = settings.get("target_mv", 0)
-        if not target_uday and not target_mv:
-            return "No targets set", 200
-        now = datetime.now()
-        utc_start = datetime.combine(now.date(), datetime.min.time()).timestamp() - IST_OFFSET
+def send_performance_alert(target_hour=None, target_minute=None):
+    """Manual performance check with optional time. Target comparison ke saath."""
+    settings = get_settings()
+    target_uday = settings.get("target_uday", 0)
+    target_mv = settings.get("target_mv", 0)
+    if not target_uday and not target_mv:
+        return "❌ Koi target set nahi. Pehle 'uday tgt 80' aur 'mv tgt 100' set karo."
+
+    now = datetime.now()
+    today_date = now.date()
+
+    if target_hour is not None:
+        r = find_report_at(today_date, target_hour, target_minute or 0)
+        if not r:
+            return f"❌ Aaj {target_hour:02d}:{(target_minute or 0):02d} ke aas-paas koi MNP report nahi mili."
+        time_label = f"till {target_hour:02d}:{(target_minute or 0):02d}"
+    else:
+        utc_start = datetime.combine(today_date, datetime.min.time()).timestamp() - IST_OFFSET
         db = get_db()
         reports = list(db.find({
             "timestamp": {"$gte": utc_start},
             "text": {"$regex": "FTA MNP|FTD"}
         }).sort("timestamp", -1).limit(1))
         if not reports:
-            bot.send_message(GROUP_CHAT_ID, "⚠️ Alert: Aaj koi MNP report nahi aayi.")
-            return "No reports", 200
-        p = reports[0].get("parsed") or parse_report(reports[0]["text"])
-        uday_now = p["distributors"].get("Uday Comm Agr", {}).get("total", 0)
-        mv_now = p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
-        today_str = today_ist_str()
-        yesterday_str = yesterday_ist_str()
-        alerts = []
-        extra_alerts = []
-        if target_uday:
-            if uday_now < target_uday:
-                gap = target_uday - uday_now
-                pct = int((uday_now / target_uday) * 100)
-                alerts.append(f"• Uday Comm Agr: {uday_now}/{target_uday} ({pct}%) — gap {gap}")
-                if settings.get("last_fail_uday") == yesterday_str:
-                    extra_alerts.append("❗ Uday Comm Agr — aap aaj bhi target pura nahi kar paye!")
-                update_setting("last_fail_uday", today_str)
-            else:
-                update_setting("last_fail_uday", "")
-        if target_mv:
-            if mv_now < target_mv:
-                gap = target_mv - mv_now
-                pct = int((mv_now / target_mv) * 100)
-                alerts.append(f"• Maa Vaishno Telecom: {mv_now}/{target_mv} ({pct}%) — gap {gap}")
-                if settings.get("last_fail_mv") == yesterday_str:
-                    extra_alerts.append("❗ Maa Vaishno Telecom — aap aaj bhi target pura nahi kar paye!")
-                update_setting("last_fail_mv", today_str)
-            else:
-                update_setting("last_fail_mv", "")
-        if alerts:
-            msg = "⚠️ Low Performance Alert\n\n" + "\n".join(alerts)
-            if extra_alerts:
-                msg += "\n\n" + "\n".join(extra_alerts)
-            if target_uday and uday_now >= target_uday:
-                msg += "\n\n✅ Uday Comm Agr ne target pura kar liya!"
-            if target_mv and mv_now >= target_mv:
-                msg += "\n✅ Maa Vaishno Telecom ne target pura kar liya!"
-            bot.send_message(GROUP_CHAT_ID, msg)
-            return "Alert sent", 200
-        return "All targets achieved", 200
+            return "⚠️ Aaj koi MNP report nahi aayi."
+        r = reports[0]
+        time_label = "latest"
+
+    p = r.get("parsed") or parse_report(r.get("text", ""))
+    if not p:
+        return "❌ Report parse nahi ho paayi."
+
+    uday_now = p["distributors"].get("Uday Comm Agr", {}).get("total", 0)
+    mv_now = p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
+    today_str = today_ist_str()
+    yesterday_str = yesterday_ist_str()
+    alerts = []
+    extra_alerts = []
+
+    if target_uday:
+        if uday_now < target_uday:
+            gap = target_uday - uday_now
+            pct = int((uday_now / target_uday) * 100)
+            alerts.append(f"• Uday Comm Agr: {uday_now}/{target_uday} ({pct}%) — gap {gap}")
+            if settings.get("last_fail_uday") == yesterday_str:
+                extra_alerts.append("❗ Uday Comm Agr — aap aaj bhi target pura nahi kar paye!")
+            update_setting("last_fail_uday", today_str)
+        else:
+            update_setting("last_fail_uday", "")
+
+    if target_mv:
+        if mv_now < target_mv:
+            gap = target_mv - mv_now
+            pct = int((mv_now / target_mv) * 100)
+            alerts.append(f"• Maa Vaishno Telecom: {mv_now}/{target_mv} ({pct}%) — gap {gap}")
+            if settings.get("last_fail_mv") == yesterday_str:
+                extra_alerts.append("❗ Maa Vaishno Telecom — aap aaj bhi target pura nahi kar paye!")
+            update_setting("last_fail_mv", today_str)
+        else:
+            update_setting("last_fail_mv", "")
+
+    if alerts:
+        msg = f"⚠️ Low Performance Alert ({time_label})\n\n" + "\n".join(alerts)
+        if extra_alerts:
+            msg += "\n\n" + "\n".join(extra_alerts)
+        if target_uday and uday_now >= target_uday:
+            msg += "\n\n✅ Uday Comm Agr ne target pura kar liya!"
+        if target_mv and mv_now >= target_mv:
+            msg += "\n✅ Maa Vaishno Telecom ne target pura kar liya!"
+        return msg
+    else:
+        msg = f"✅ Sab targets pura ho gaye ({time_label})\n\n"
+        msg += f"• Uday Comm Agr: {uday_now}/{target_uday}\n• Maa Vaishno Telecom: {mv_now}/{target_mv}"
+        return msg
+
+@app.route('/check-performance', methods=['GET'])
+def check_performance():
+    try:
+        text = send_performance_alert()
+        if text.startswith("❌") or text.startswith("⚠️"):
+            bot.send_message(GROUP_CHAT_ID, text)
+            return "No action", 200
+        if "Sab targets pura" in text:
+            return "All targets achieved", 200
+        bot.send_message(GROUP_CHAT_ID, text)
+        return "Alert sent", 200
     except Exception as e:
         return "Error: " + str(e), 500
 
@@ -505,6 +535,37 @@ def handle(message):
         if ("target" in lower or "tgt" in lower) and any(w in lower for w in ["status", "kitna", "check", "dikhao"]):
             s = get_settings()
             bot.reply_to(message, f"🎯 Current Targets:\n• Uday Comm Agr: {s.get('target_uday', 0)}\n• Maa Vaishno Telecom: {s.get('target_mv', 0)}")
+            return
+
+        # -------- ACHIEVEMENT / PERFORMANCE (till time ach) --------
+        wants_ach = any(w in lower for w in ["ach", "achievement", "achiv", "achiev"])
+        if wants_ach:
+            t = extract_time(lower)
+            if t:
+                bot.reply_to(message, send_performance_alert(t[0], t[1]))
+            else:
+                bot.reply_to(message, send_performance_alert())
+            return
+
+        # -------- PERFORMANCE CHECK (manual) --------
+        perf_triggers = ["performance", "perfomance", "alert"]
+        has_perf = any(w in lower for w in perf_triggers)
+        has_check_word = any(w in lower for w in ["check", "karo", "do", "batao", "dikhao", "dekho"])
+
+        if has_perf and has_check_word:
+            t = extract_time(lower)
+            if t:
+                bot.reply_to(message, send_performance_alert(t[0], t[1]))
+            else:
+                bot.reply_to(message, send_performance_alert())
+            return
+
+        if "till" in lower and any(w in lower for w in ["check", "performance", "perfomance", "alert"]):
+            t = extract_time(lower)
+            if t:
+                bot.reply_to(message, send_performance_alert(t[0], t[1]))
+            else:
+                bot.reply_to(message, send_performance_alert())
             return
 
         wants_graph = any(w in lower for w in ["graph", "chart"])
