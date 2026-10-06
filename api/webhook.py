@@ -640,21 +640,21 @@ def handle(message):
                 return
             from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
             kb = InlineKeyboardMarkup(row_width=2)
-            kb.add(
-                InlineKeyboardButton("Bar Graph", callback_data="graph_bar"),
-                InlineKeyboardButton("Pie Chart", callback_data="graph_pie"),
-                InlineKeyboardButton("Line Chart", callback_data="graph_line"),
-                InlineKeyboardButton("Aaj Projection", callback_data="proj_day"),
-                InlineKeyboardButton("Weekly Proj", callback_data="proj_week"),
-                InlineKeyboardButton("Monthly Proj", callback_data="proj_month"),
-                InlineKeyboardButton("Performance", callback_data="perf_check"),
-                InlineKeyboardButton("Target Status", callback_data="tgt_status"),
-                InlineKeyboardButton("Stock Check", callback_data="stock_check"),
-                InlineKeyboardButton("Weekly Summary", callback_data="weekly_summary"),
-                InlineKeyboardButton("Peak Hours", callback_data="peak_hours"),
-                InlineKeyboardButton("Distributors", callback_data="dist_compare"),
-            )
-            bot.reply_to(message, "DTR Mainpuri Bot Menu\n\nKya dekhna chahte ho?", reply_markup=kb)
+kb.add(
+    InlineKeyboardButton("📊 Bar Graph", callback_data="graph_bar"),
+    InlineKeyboardButton("🥧 Pie Chart", callback_data="graph_pie"),
+    InlineKeyboardButton("📈 Line Chart", callback_data="graph_line"),
+    InlineKeyboardButton("📉 Aaj Projection", callback_data="proj_day"),
+    InlineKeyboardButton("📊 Weekly Proj", callback_data="proj_week"),
+    InlineKeyboardButton("📅 Monthly Proj", callback_data="proj_month"),
+    InlineKeyboardButton("⚠️ Performance", callback_data="perf_check"),
+    InlineKeyboardButton("🎯 Target Status", callback_data="tgt_status"),
+    InlineKeyboardButton("🚨 Stock Check", callback_data="stock_check"),
+    InlineKeyboardButton("📋 Weekly Summary", callback_data="weekly_summary"),
+    InlineKeyboardButton("🏆 Peak Hours", callback_data="peak_hours"),
+    InlineKeyboardButton("⚖️ Distributors", callback_data="dist_compare"),
+)
+bot.reply_to(message, "🤖 DTR Mainpuri Bot Menu\n\nKya dekhna chahte ho?", reply_markup=kb)
             return
 
         tm = re.search(r'(uday|mv|maa\s*vaishno|vaishno)\s*tag\s*(@?[\w_]+)', lo)
