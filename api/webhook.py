@@ -164,7 +164,7 @@ def get_daily_data(days=7):
 
 def quickchart_url(config, width=800, height=400):
     encoded = urllib.parse.quote(json.dumps(config))
-    return f"https://quickchart.io/chart?c={encoded}&w={width}&h={height}&bkg=white"
+    return f"https://quickchart.io/chart?c={encoded}&w={width}&h={height}&bkg=white&plugins=chartjs-plugin-datalabels"
 
 def build_bar_chart(days=7):
     data = get_daily_data(days)
