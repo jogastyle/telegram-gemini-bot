@@ -640,7 +640,7 @@ def save_report_endpoint():
         return "Saved", 200
     except Exception as e:
         return "Error: " + str(e), 500
-
+        
 @bot.message_handler(func=lambda m: True)
 def handle(message):
     try:
@@ -660,6 +660,7 @@ def handle(message):
         clean_text = text.replace(BOT_USERNAME, "").strip() or "Hi"
         lower = clean_text.lower()
 
+        # WORKING HOURS
         whm = re.search(r'working\s*hours?\s*(\d{1,2})(?::(\d{2}))?\s*(?:se|to|-)\s*(\d{1,2})(?::(\d{2}))?', lower)
         if whm and (is_tagged or is_private):
             start = int(whm.group(1)) + (int(whm.group(2))/60 if whm.group(2) else 0)
@@ -673,6 +674,7 @@ def handle(message):
             bot.reply_to(message, f"⏰ Current working hours: {int(ws)}:00 se {int(we)}:00")
             return
 
+        # TARGET SET
         tm = re.search(r'(uday|maa\s*vaishno|mv|vaishno)\s*(?:target|tgt)\s*(\d+)', lower)
         if tm:
             dist_key = tm.group(1); val = int(tm.group(2))
@@ -697,6 +699,7 @@ def handle(message):
             bot.reply_to(message, f"🎯 Current Targets:\n• Uday Comm Agr: {s.get('target_uday', 0)}\n• Maa Vaishno Telecom: {s.get('target_mv', 0)}\n\n⏰ Working hours: {int(ws)}:00 se {int(we)}:00")
             return
 
+        # PROJECTION
         wants_proj = any(w in lower for w in ["projection", "prediction", "predict", "forecast", "estimate", "anuman"])
         if wants_proj:
             if any(w in lower for w in ["week", "hafte", "haftey", "hafte ka", "saaptah", "saaptahik"]):
@@ -707,6 +710,7 @@ def handle(message):
                 bot.reply_to(message, send_projection("day"))
             return
 
+        # ACHIEVEMENT
         wants_ach = any(w in lower for w in ["ach", "achievement", "achiv", "achiev"])
         if wants_ach:
             t = extract_time(lower)
@@ -716,6 +720,7 @@ def handle(message):
                 bot.reply_to(message, send_performance_alert())
             return
 
+        # PERFORMANCE CHECK
         perf_triggers = ["performance", "perfomance", "alert"]
         has_perf = any(w in lower for w in perf_triggers)
         has_check_word = any(w in lower for w in ["check", "karo", "do", "batao", "dikhao", "dekho"])
@@ -735,6 +740,7 @@ def handle(message):
                 bot.reply_to(message, send_performance_alert())
             return
 
+        # GRAPHS
         wants_graph = any(w in lower for w in ["graph", "chart"])
         if wants_graph:
             days = 7
@@ -774,6 +780,7 @@ def handle(message):
             bot.reply_to(message, build_weekly_summary())
             return
 
+        # COMPARE
         wants_compare = any(w in lower for w in ["compare", "farq", "antar", "difference", "vs"])
         if wants_compare:
             parts = re.split(r'\baur\b|\bor\b|\bya\b|\band\b|\bvs\b|\bse\b', lower)
@@ -811,10 +818,7 @@ def handle(message):
                 bot.reply_to(message, "Database mein kam se kam 2 MNP reports chahiye.")
                 return
 
-        response = client.chat.completions.create(
-            messages=[
-                {"role": "system", "content": "You are a helpful Telegram assistant. Reply in same language. Ans
-        
+        # FALLBACK AI
         response = client.chat.completions.create(
             messages=[
                 {"role": "system", "content": "You are a helpful Telegram assistant. Reply in same language. Answer in 1-3 lines."},
