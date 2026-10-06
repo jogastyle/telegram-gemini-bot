@@ -1003,16 +1003,26 @@ def handle(message):
             return
 
         if any(w in lo for w in ["projection", "prediction", "predict", "forecast", "anuman"]):
-            if not check_perm("projections", adm):
-                bot.reply_to(message, "❌ Ye feature currently disabled hai.")
+    if not check_perm("projections", adm):
+        bot.reply_to(message, "❌ Ye feature currently disabled hai.")
+        return
+    dm = re.search(r'(\d{1,2})\s*([a-z]{3,9})', lo)
+    if dm:
+        try:
+            dyy = int(dm.group(1))
+            mstr = dm.group(2).lower()[:3]
+            if mstr in MON and 1 <= dyy <= 31:
+                bot.reply_to(message, proj_till(dyy, MON[mstr]))
                 return
-            if any(w in lo for w in ["week", "hafte", "saaptah"]):
-                bot.reply_to(message, proj_week())
-            elif any(w in lo for w in ["month", "mahine", "mahina", "maasik"]):
-                bot.reply_to(message, proj_month())
-            else:
-                bot.reply_to(message, projection("day"))
-            return
+        except:
+            pass
+    if any(w in lo for w in ["week", "hafte", "saaptah"]):
+        bot.reply_to(message, proj_week())
+    elif any(w in lo for w in ["month", "mahine", "mahina", "maasik"]):
+        bot.reply_to(message, proj_month())
+    else:
+        bot.reply_to(message, projection("day"))
+    return
 
         if any(w in lo for w in ["ach", "achievement", "achiv", "achiev"]):
             if not check_perm("performance", adm):
@@ -1235,6 +1245,76 @@ def index():
     return "Bot is running!", 200
 
 
+
+def proj_till(dy, mon_num):
+    now = datetime.now()
+    today = now.date()
+    try:
+        target_date = datetime(today.year, mon_num, dy).date()
+    except:
+        return "❌ Galat date."
+    if target_date < today:
+        return f"❌ {dy} {target_date.strftime('%b')} ki date nikal gayi."
+    days_until = (target_date - today).days
+    ms = today.replace(day=1)
+    um = datetime.combine(ms, datetime.min.time()).timestamp() - IST
+    reps = list(get_db().find({"timestamp": {"$gte": um}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", 1))
+    daily = {}
+    for r in reps:
+        daily[time.strftime("%Y-%m-%d", time.gmtime(r["timestamp"] + IST))] = r
+    u_sofar = 0; m_sofar = 0; dd = 0
+    for r in daily.values():
+        p = parse_mnp(r.get("text", ""))
+        if p:
+            u_sofar += p["distributors"].get("Uday Comm Agr", {}).get("total", 0)
+            m_sofar += p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
+            dd += 1
+    if dd == 0:
+        return "❌ Koi data nahi hai."
+    t_sofar = u_sofar + m_sofar
+    u_avg = int(u_sofar / dd)
+    m_avg = int(m_sofar / dd)
+    u_exp = int(u_sofar + u_avg * days_until)
+    m_exp = int(m_sofar + m_avg * days_until)
+    t_exp = u_exp + m_exp
+    target_str = target_date.strftime("%d %b")
+    lines = [
+        f"📈 Projection till {target_str}",
+        "",
+        f"Aaj tak ({dd} din):",
+        f"🔵 Uday: {u_sofar}",
+        f"🔴 Maa Vaishno: {m_sofar}",
+        f"🎯 Total: {t_sofar}",
+        "",
+        "📊 Daily Avg:",
+        f"🔵 Uday: {u_avg}/din",
+        f"🔴 Maa Vaishno: {m_avg}/din",
+        "",
+        f"📈 Expected till {target_str} ({days_until} din baaki):",
+        f"🔵 Uday: ~{u_exp}",
+        f"🔴 Maa Vaishno: ~{m_exp}",
+        f"🎯 Total: ~{t_exp}",
+    ]
+    mt_u = get_target("uday", "month")
+    mt_m = get_target("mv", "month")
+    if mt_u or mt_m:
+        lines.append("")
+        lines.append("🎯 Month Target (aapka):")
+        if mt_u: lines.append(f"🔵 Uday: {mt_u}")
+        if mt_m: lines.append(f"🔴 Maa Vaishno: {mt_m}")
+        lines.append("")
+        lines.append(f"⚖️ Target vs Projection (till {target_str}):")
+        if mt_u:
+            pct = int(u_exp/mt_u*100)
+            diff = u_exp - mt_u
+            mark = f"❌ gap {-diff}" if diff < 0 else f"✅ +{diff}"
+            lines.append(f"🔵 Uday: {u_exp}/{mt_u} ({pct}%) — {mark}")
+        if mt_m:
+            pct = int(m_exp/mt_m*100)
+            diff = m_exp - mt_m
+            mark = f"❌ gap {-diff}" if diff < 0 else f"✅ +{diff}"
+            lines.append(f"🔴 Maa Vaishno: {m_exp}/{mt_m} ({pct}%) — {mark}")
+    return "\n".join(lines)
 @app.route('/test', methods=['GET'])
 def test():
     return "Token: " + ("SET" if BOT_TOKEN else "MISSING") + ", Groq: " + ("SET" if GROQ_KEY else "MISSING") + ", DB: " + ("SET" if MONGO_URL else "MISSING")
