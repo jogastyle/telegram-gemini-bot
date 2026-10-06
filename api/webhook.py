@@ -536,3 +536,116 @@ def handle(message):
 
             wants_bar = "bar" in lower or "column" in lower
             wants_pie = "pie" in lower or "share" in low
+                        wants_pie = "pie" in lower or "share" in lower or "distribution" in lower
+            wants_line = "line" in lower or "trend" in lower
+            wants_all = any(w in lower for w in ["sabhi", "full", "teeno", "all", "sab"])
+
+            bot.send_message(message.chat.id, "⏳ Graph ban raha hai...")
+
+            if wants_all:
+                types_to_send = ["bar", "pie", "line"]
+            elif wants_bar and wants_pie:
+                types_to_send = ["bar", "pie"]
+            elif wants_bar and wants_line:
+                types_to_send = ["bar", "line"]
+            elif wants_pie and wants_line:
+                types_to_send = ["pie", "line"]
+            elif wants_pie:
+                types_to_send = ["pie"]
+            elif wants_line:
+                types_to_send = ["line"]
+            else:
+                types_to_send = ["bar"]
+
+            for t in types_to_send:
+                try:
+                    if t == "bar": url = build_bar_chart(days)
+                    elif t == "pie": url = build_pie_chart(days)
+                    else: url = build_line_chart(days)
+                    bot.send_photo(message.chat.id, url)
+                    time.sleep(1)
+                except Exception as ge:
+                    bot.send_message(message.chat.id, f"Graph error ({t}): {str(ge)}")
+            return
+
+        # -------- WEEKLY SUMMARY --------
+        if "weekly" in lower or "hafte ka summary" in lower or "hafte ki summary" in lower:
+            bot.reply_to(message, build_weekly_summary())
+            return
+
+        # -------- COMPARE --------
+        wants_compare = any(w in lower for w in ["compare", "farq", "antar", "difference", "vs"])
+        if wants_compare:
+            parts = re.split(r'\baur\b|\bor\b|\bya\b|\band\b|\bvs\b|\bse\b', lower)
+            anchors = []
+            for part in parts:
+                t = extract_time(part)
+                d = extract_date(part)
+                if t or d:
+                    anchors.append((d, t))
+
+            if len(anchors) >= 2:
+                a1, a2 = anchors[0], anchors[1]
+                d1 = a1[0] or (datetime.now().date() - timedelta(days=1))
+                d2 = a2[0] or datetime.now().date()
+                t1 = a1[1] or (12, 0)
+                t2 = a2[1] or (12, 0)
+
+                r1 = find_report_at(d1, t1[0], t1[1])
+                r2 = find_report_at(d2, t2[0], t2[1])
+
+                if not r1:
+                    bot.reply_to(message, f"{d1.strftime('%d %b')} {t1[0]:02d}:{t1[1]:02d} ke aas-paas koi MNP report nahi mili.")
+                    return
+                if not r2:
+                    bot.reply_to(message, f"{d2.strftime('%d %b')} {t2[0]:02d}:{t2[1]:02d} ke aas-paas koi MNP report nahi mili.")
+                    return
+
+                label_old = f"{d1.strftime('%d %b')} {t1[0]:02d}:{t1[1]:02d}"
+                label_new = f"{d2.strftime('%d %b')} {t2[0]:02d}:{t2[1]:02d}"
+                bot.reply_to(message, format_comparison(r1, r2, label_old, label_new))
+                return
+
+            db = get_db()
+            last_two = list(db.find({"text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", -1).limit(2))
+            if len(last_two) >= 2:
+                r1, r2 = last_two[1], last_two[0]
+                bot.reply_to(message, format_comparison(r1, r2))
+                return
+            else:
+                bot.reply_to(message, "Database mein kam se kam 2 MNP reports chahiye.")
+                return
+
+        # -------- NORMAL AI --------
+        response = client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": "You are a helpful Telegram assistant. Reply in same language. Answer in 1-3 lines."},
+                {"role": "user", "content": clean_text}
+            ],
+            model="openai/gpt-oss-20b",
+        )
+        bot.reply_to(message, response.choices[0].message.content)
+
+    except Exception as e:
+        try:
+            bot.reply_to(message, "Error: " + str(e))
+        except:
+            pass
+
+# ================= WEBHOOK =================
+@app.route('/', methods=['POST'])
+def webhook():
+    try:
+        update = telebot.types.Update.de_json(request.stream.read().decode('utf-8'))
+        bot.process_new_updates([update])
+    except Exception as e:
+        print("WEBHOOK ERROR:", str(e))
+    return "OK", 200
+
+@app.route('/', methods=['GET'])
+def index():
+    return "Bot is running!", 200
+
+@app.route('/test', methods=['GET'])
+def test():
+    return "Token: " + ("SET" if BOT_TOKEN else "MISSING") + ", Groq: " + ("SET" if GROQ_KEY else "MISSING") + ", DB: " + ("SET" if MONGO_URL else "MISSING")
