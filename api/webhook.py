@@ -58,6 +58,23 @@ def set_target(distributor, value):
     db = get_db()
     db.update_one({"_id": "settings"}, {"$set": {f"target_{distributor}": value}}, upsert=True)
 
+MSISDN_MAP = {
+    "9997389467": "Uday Comm Agr",
+    "7895110381": "Maa Vaishno Telecom",
+}
+
+def get_tag(distributor_key):
+    s = get_settings()
+    return s.get(f"tag_{distributor_key}", "")
+
+def set_tag(distributor_key, username):
+    db = get_db()
+    if username and not username.startswith("@"):
+        username = "@" + username
+    db.update_one({"_id": "settings"}, {"$set": {f"tag_{distributor_key}": username}}, upsert=True)
+
+app = Flask(__name__)
+
 def is_admin(user_id, username):
     s = get_settings()
     owner_id = s.get("owner_id")
@@ -88,23 +105,6 @@ def remove_admin(username):
     admins = s.get("admins", [])
     admins = [a for a in admins if a.lower() != username.lower()]
     db.update_one({"_id": "settings"}, {"$set": {"admins": admins}}, upsert=True)
-
-MSISDN_MAP = {
-    "9997389467": "Uday Comm Agr",
-    "7895110381": "Maa Vaishno Telecom",
-}
-
-def get_tag(distributor_key):
-    s = get_settings()
-    return s.get(f"tag_{distributor_key}", "")
-
-def set_tag(distributor_key, username):
-    db = get_db()
-    if username and not username.startswith("@"):
-        username = "@" + username
-    db.update_one({"_id": "settings"}, {"$set": {f"tag_{distributor_key}": username}}, upsert=True)
-
-app = Flask(__name__)
 
 DEFAULT_PERMS = {
     "graphs": {"admin": True, "user": True},
@@ -178,7 +178,7 @@ def reset_permissions():
 
 def build_permission_dashboard():
     perms = get_permissions()
-    lines = ["🔐 Permission Dashboard", ""]
+    lines = ["Permission Dashboard", ""]
     lines.append(f"{'Command':<20} {'Admin':<8} {'User':<8}")
     lines.append("-" * 38)
     for k in DEFAULT_PERMS.keys():
@@ -188,7 +188,7 @@ def build_permission_dashboard():
     lines.append("")
     lines.append("Badalne: perm <name> <admin|user> <on|off>")
     return "\n".join(lines)
-
+    
 
 DIST_PATTERN = re.compile(
     r'Dist\s+([A-Za-z0-9 &\.\-\']+?)\s*-\s*\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)\s*/\s*\((\d+)\)'
@@ -272,8 +272,8 @@ def format_comparison(r_old, r_new, label_old="Pehle", label_new="Ab"):
     if not p_old or not p_new:
         return "Reports parse nahi ho paayi."
     lines = ["MNP Comparison"]
-    lines.append(f"• {label_old}: {r_old.get('date_str','')} (till {p_old.get('report_time','?')})")
-    lines.append(f"• {label_new}: {r_new.get('date_str','')} (till {p_new.get('report_time','?')})")
+    lines.append(f"{label_old}: {r_old.get('date_str','')} (till {p_old.get('report_time','?')})")
+    lines.append(f"{label_new}: {r_new.get('date_str','')} (till {p_new.get('report_time','?')})")
     lines.append("")
     all_dists = set(p_old["distributors"].keys()) | set(p_new["distributors"].keys())
     for d in sorted(all_dists):
@@ -281,13 +281,13 @@ def format_comparison(r_old, r_new, label_old="Pehle", label_new="Ab"):
         b = p_new["distributors"].get(d, {}).get("total", 0)
         diff = b - a
         sign = "+" if diff >= 0 else ""
-        lines.append(f"• {d}: {a} → {b} ({sign}{diff})")
+        lines.append(f"{d}: {a} -> {b} ({sign}{diff})")
     a = (p_old["total"] or {}).get("total", 0)
     b = (p_new["total"] or {}).get("total", 0)
     diff = b - a
     sign = "+" if diff >= 0 else ""
     lines.append("")
-    lines.append(f"Total: {a} → {b} ({sign}{diff})")
+    lines.append(f"Total: {a} -> {b} ({sign}{diff})")
     return "\n".join(lines)
 
 
@@ -366,7 +366,7 @@ def build_bar_chart(days=7):
         }
     }
     return quickchart_url(config)
-
+    
 
 def build_pie_chart(days=7):
     data = get_daily_data(days)
@@ -424,7 +424,7 @@ def build_weekly_summary():
     grand_total = sum(day_totals.values())
     lines = ["Weekly MNP Summary", "(Last 7 days)", "", "Distributor-wise total:"]
     for name, val in sorted(dist_totals.items(), key=lambda x: -x[1]):
-        lines.append(f"• {name}: {val}")
+        lines.append(f"{name}: {val}")
     lines.append("")
     lines.append(f"Grand Total: {grand_total}")
     nonzero = {k: v for k, v in day_totals.items() if v > 0}
@@ -526,7 +526,7 @@ def send_performance_alert(target_hour=None, target_minute=None):
     target_uday = settings.get("target_uday", 0)
     target_mv = settings.get("target_mv", 0)
     if not target_uday and not target_mv:
-        return "Koi target set nahi. Pehle 'uday tgt 80' aur 'mv tgt 100' set karo."
+        return "Koi target set nahi."
     now = datetime.now()
     today_date = now.date()
     if target_hour is not None:
@@ -560,9 +560,9 @@ def send_performance_alert(target_hour=None, target_minute=None):
             pct = int((uday_now / target_uday) * 100)
             uday_tag = get_tag("uday")
             ts = f" {uday_tag}" if uday_tag else ""
-            alerts.append(f"• Uday Comm Agr{ts}: {uday_now}/{target_uday} ({pct}%) — gap {gap}")
+            alerts.append(f"Uday Comm Agr{ts}: {uday_now}/{target_uday} ({pct}%) - gap {gap}")
             if settings.get("last_fail_uday") == yesterday_str:
-                extra_alerts.append(f"Uday Comm Agr{ts} — aap aaj bhi target pura nahi kar paye!")
+                extra_alerts.append(f"Uday Comm Agr{ts} - aap aaj bhi target pura nahi kar paye!")
             update_setting("last_fail_uday", today_str)
         else:
             update_setting("last_fail_uday", "")
@@ -572,9 +572,9 @@ def send_performance_alert(target_hour=None, target_minute=None):
             pct = int((mv_now / target_mv) * 100)
             mv_tag = get_tag("mv")
             ts = f" {mv_tag}" if mv_tag else ""
-            alerts.append(f"• Maa Vaishno Telecom{ts}: {mv_now}/{target_mv} ({pct}%) — gap {gap}")
+            alerts.append(f"Maa Vaishno Telecom{ts}: {mv_now}/{target_mv} ({pct}%) - gap {gap}")
             if settings.get("last_fail_mv") == yesterday_str:
-                extra_alerts.append(f"Maa Vaishno Telecom{ts} — aap aaj bhi target pura nahi kar paye!")
+                extra_alerts.append(f"Maa Vaishno Telecom{ts} - aap aaj bhi target pura nahi kar paye!")
             update_setting("last_fail_mv", today_str)
         else:
             update_setting("last_fail_mv", "")
@@ -589,7 +589,7 @@ def send_performance_alert(target_hour=None, target_minute=None):
         return msg
     else:
         msg = f"Sab targets pura ho gaye ({time_label})\n\n"
-        msg += f"• Uday Comm Agr: {uday_now}/{target_uday}\n• Maa Vaishno Telecom: {mv_now}/{target_mv}"
+        msg += f"Uday Comm Agr: {uday_now}/{target_uday}\nMaa Vaishno Telecom: {mv_now}/{target_mv}"
         return msg
 
 
@@ -618,7 +618,7 @@ def build_balance_alert(parsed_items, threshold=3):
         lines.append(f"   Balance: {it['balance']:,}")
         lines.append(f"   Sale: {it['sale']} Lakh")
         lines.append("")
-    lines.append(f"Aapka balance {threshold} din se kam hai — aaj hi billing karayen!")
+    lines.append(f"Aapka balance {threshold} din se kam hai - aaj hi billing karayen!")
     return "\n".join(lines)
 
 
@@ -636,7 +636,7 @@ def send_stock_check(threshold=3):
     lines = ["Sab distributors ka stock theek hai", ""]
     for item in parsed.get("items", []):
         name = MSISDN_MAP.get(item["msisdn"], item["msisdn"])
-        lines.append(f"• {name}: {item['stock_days']} din")
+        lines.append(f"{name}: {item['stock_days']} din")
     return "\n".join(lines)
     
 
@@ -676,7 +676,7 @@ def send_projection(period="day"):
             "timestamp": {"$gte": utc_today}, "text": {"$regex": "FTA MNP|FTD"}
         }).sort("timestamp", 1))
         if not today_reports:
-            return "Aaj koi report nahi aayi. Projection ke liye data chahiye."
+            return "Aaj koi report nahi aayi."
         first_ts = today_reports[0]["timestamp"]
         last_ts = today_reports[-1]["timestamp"]
         first_ist = datetime.fromtimestamp(first_ts + IST_OFFSET)
@@ -691,15 +691,15 @@ def send_projection(period="day"):
         elapsed = max(0.5, current_hour - eff_start)
         remaining = max(0, wh_end - current_hour)
         if remaining <= 0:
-            return f"Aaj ka final (working hours khatam)\n\n• Uday: {uday_today}\n• Maa Vaishno: {mv_today}\n• Total: {total_today}"
+            return f"Aaj ka final\n\nUday: {uday_today}\nMaa Vaishno: {mv_today}\nTotal: {total_today}"
         rate_uday = uday_today / elapsed
         rate_mv = mv_today / elapsed
         rate_total = total_today / elapsed
         proj_uday = int(rate_uday * (elapsed + remaining))
         proj_mv = int(rate_mv * (elapsed + remaining))
         proj_total = int(rate_total * (elapsed + remaining))
-        msg = f"Aaj ki Projection\n\nAbhi tak ({last_ist.strftime('%H:%M')}):\n• Uday: {uday_today}\n• Maa Vaishno: {mv_today}\n• Total: {total_today}\n\n"
-        msg += f"Expected ({int(wh_end)}:00 tak):\n• Uday: ~{proj_uday}\n• Maa Vaishno: ~{proj_mv}\n• Total: ~{proj_total}"
+        msg = f"Aaj ki Projection\n\nAbhi tak ({last_ist.strftime('%H:%M')}):\nUday: {uday_today}\nMaa Vaishno: {mv_today}\nTotal: {total_today}\n\n"
+        msg += f"Expected ({int(wh_end)}:00 tak):\nUday: ~{proj_uday}\nMaa Vaishno: ~{proj_mv}\nTotal: ~{proj_total}"
         return msg
     elif period == "week":
         days_since_monday = today.weekday()
@@ -788,7 +788,7 @@ def send_peak_hours(days=7):
     sorted_hours = sorted(hourly.items(), key=lambda x: -x[1])[:5]
     lines = [f"Peak Hours (last {days} days)", ""]
     for h, count in sorted_hours:
-        lines.append(f"• {h:02d}:00 - {h+1:02d}:00 → {count} MNP")
+        lines.append(f"{h:02d}:00 - {h+1:02d}:00 -> {count} MNP")
     return "\n".join(lines)
     
 
@@ -933,7 +933,7 @@ def send_custom_report(distributor, days=7):
         vals = data["mv"]
         name = "Maa Vaishno Telecom"
     else:
-        return f"Distributor '{distributor}' nahi pehchana. 'uday' ya 'mv' likho."
+        return f"Distributor '{distributor}' nahi pehchana."
     total = sum(vals)
     days_data = len([v for v in vals if v > 0])
     avg = int(total / days_data) if days_data else 0
@@ -945,7 +945,7 @@ def send_custom_report(distributor, days=7):
     lines.append("")
     lines.append("Daily breakdown:")
     for i, label in enumerate(data["labels"]):
-        lines.append(f"• {label}: {vals[i]}")
+        lines.append(f"{label}: {vals[i]}")
     return "\n".join(lines)
 
 
@@ -971,7 +971,7 @@ def daily_quote():
         time.sleep(1)
         response = client.chat.completions.create(
             messages=[
-                {"role": "system", "content": "Generate a work-related motivational message in Hindi (Devanagari script). It must be 2-3 lines long, about teamwork, hard work, or success. Do NOT include any greeting. Do NOT include author names. Just the motivational lines."},
+                {"role": "system", "content": "Generate a work-related motivational message in Hindi (Devanagari script). It must be 2-3 lines long, about teamwork, hard work, or success. Do NOT include any greeting. Just the motivational lines."},
                 {"role": "user", "content": "Give me today's work motivational message."}
             ],
             model="openai/gpt-oss-20b",
@@ -1039,7 +1039,7 @@ def handle(message):
             s = get_settings()
             if not s.get("owner_id"):
                 update_setting("owner_id", user_id)
-                bot.reply_to(message, "Aap ab owner hain! Aapke paas full access hai.")
+                bot.reply_to(message, "Aap ab owner hain!")
             else:
                 bot.reply_to(message, "Owner pehle se set hai.")
             return
@@ -1063,7 +1063,7 @@ def handle(message):
             lines = [f"Owner ID: {owner_id}", "", "Admins:"]
             if admins:
                 for a in admins:
-                    lines.append(f"• {a}")
+                    lines.append(f"{a}")
             else:
                 lines.append("(Koi admin nahi)")
             bot.reply_to(message, "\n".join(lines))
@@ -1095,7 +1095,7 @@ def handle(message):
                 return
             set_permission(key, role, value)
             emoji = "ON" if value else "OFF"
-            bot.reply_to(message, f"Permission updated:\n{key} → {role} = {emoji}")
+            bot.reply_to(message, f"Permission updated:\n{key} -> {role} = {emoji}")
             return
 
         if lower.strip() in ["perm reset", "permission reset"]:
@@ -1105,317 +1105,316 @@ def handle(message):
             reset_permissions()
             bot.reply_to(message, "Permissions reset to default.")
             return
+if lower.strip() in ["/start", "/menu", "menu", "start", "help", "commands"]:
+    if not check_permission("menu", admin):
+        bot.reply_to(message, "Menu currently disabled hai.")
+        return
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("Bar Graph", callback_data="graph_bar"),
+        InlineKeyboardButton("Pie Chart", callback_data="graph_pie"),
+        InlineKeyboardButton("Line Chart", callback_data="graph_line"),
+        InlineKeyboardButton("Aaj Projection", callback_data="proj_day"),
+        InlineKeyboardButton("Weekly Proj", callback_data="proj_week"),
+        InlineKeyboardButton("Monthly Proj", callback_data="proj_month"),
+        InlineKeyboardButton("Performance", callback_data="perf_check"),
+        InlineKeyboardButton("Target Status", callback_data="tgt_status"),
+        InlineKeyboardButton("Stock Check", callback_data="stock_check"),
+        InlineKeyboardButton("Weekly Summary", callback_data="weekly_summary"),
+        InlineKeyboardButton("Peak Hours", callback_data="peak_hours"),
+        InlineKeyboardButton("Distributors", callback_data="dist_compare"),
+    )
+    bot.reply_to(message, "DTR Mainpuri Bot Menu\n\nKya dekhna chahte ho?", reply_markup=kb)
+    return
 
-        if lower.strip() in ["/start", "/menu", "menu", "start", "help", "commands"]:
-            if not check_permission("menu", admin):
-                bot.reply_to(message, "Menu currently disabled hai.")
-                return
-            from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-            kb = InlineKeyboardMarkup(row_width=2)
-            kb.add(
-                InlineKeyboardButton("Bar Graph", callback_data="graph_bar"),
-                InlineKeyboardButton("Pie Chart", callback_data="graph_pie"),
-                InlineKeyboardButton("Line Chart", callback_data="graph_line"),
-                InlineKeyboardButton("Aaj Projection", callback_data="proj_day"),
-                InlineKeyboardButton("Weekly Proj", callback_data="proj_week"),
-                InlineKeyboardButton("Monthly Proj", callback_data="proj_month"),
-                InlineKeyboardButton("Performance", callback_data="perf_check"),
-                InlineKeyboardButton("Target Status", callback_data="tgt_status"),
-                InlineKeyboardButton("Stock Check", callback_data="stock_check"),
-                InlineKeyboardButton("Weekly Summary", callback_data="weekly_summary"),
-                InlineKeyboardButton("Peak Hours", callback_data="peak_hours"),
-                InlineKeyboardButton("Distributors", callback_data="dist_compare"),
-            )
-            bot.reply_to(message, "DTR Mainpuri Bot Menu\n\nKya dekhna chahte ho?", reply_markup=kb)
-            return
+tagm = re.search(r'(uday|mv|maa\s*vaishno|vaishno)\s*tag\s*(@?[\w_]+)', lower)
+if tagm and (is_tagged or is_private):
+    if not check_permission("tag_set", admin):
+        bot.reply_to(message, "Ye command sirf admins use kar sakte hain.")
+        return
+    dist_key = "uday" if "uday" in tagm.group(1) else "mv"
+    set_tag(dist_key, tagm.group(2))
+    display = "Uday Comm Agr" if dist_key == "uday" else "Maa Vaishno Telecom"
+    bot.reply_to(message, f"{display} ke alerts mein ab {tagm.group(2)} tag hoga.")
+    return
 
-        tagm = re.search(r'(uday|mv|maa\s*vaishno|vaishno)\s*tag\s*(@?[\w_]+)', lower)
-        if tagm and (is_tagged or is_private):
-            if not check_permission("tag_set", admin):
-                bot.reply_to(message, "Ye command sirf admins use kar sakte hain.")
-                return
-            dist_key = "uday" if "uday" in tagm.group(1) else "mv"
-            set_tag(dist_key, tagm.group(2))
-            display = "Uday Comm Agr" if dist_key == "uday" else "Maa Vaishno Telecom"
-            bot.reply_to(message, f"{display} ke alerts mein ab {tagm.group(2)} tag hoga.")
-            return
+tagr = re.search(r'(uday|mv|maa\s*vaishno|vaishno)\s*(?:tag\s*)?(?:remove|hatao|hata|delete|clear)', lower)
+if tagr and (is_tagged or is_private):
+    if not check_permission("tag_set", admin):
+        bot.reply_to(message, "Ye command sirf admins use kar sakte hain.")
+        return
+    dist_key = "uday" if "uday" in tagr.group(1) else "mv"
+    set_tag(dist_key, "")
+    display = "Uday Comm Agr" if dist_key == "uday" else "Maa Vaishno Telecom"
+    bot.reply_to(message, f"{display} ka tag hata diya gaya.")
+    return
 
-        tagr = re.search(r'(uday|mv|maa\s*vaishno|vaishno)\s*(?:tag\s*)?(?:remove|hatao|hata|delete|clear)', lower)
-        if tagr and (is_tagged or is_private):
-            if not check_permission("tag_set", admin):
-                bot.reply_to(message, "Ye command sirf admins use kar sakte hain.")
-                return
-            dist_key = "uday" if "uday" in tagr.group(1) else "mv"
-            set_tag(dist_key, "")
-            display = "Uday Comm Agr" if dist_key == "uday" else "Maa Vaishno Telecom"
-            bot.reply_to(message, f"{display} ka tag hata diya gaya.")
-            return
+if "tag" in lower and any(w in lower for w in ["status", "dikhao", "check"]) and (is_tagged or is_private):
+    u_tag = get_tag("uday") or "(set nahi)"
+    m_tag = get_tag("mv") or "(set nahi)"
+    bot.reply_to(message, f"Current Tags:\nUday: {u_tag}\nMaa Vaishno: {m_tag}")
+    return
 
-        if "tag" in lower and any(w in lower for w in ["status", "dikhao", "check"]) and (is_tagged or is_private):
-            u_tag = get_tag("uday") or "(set nahi)"
-            m_tag = get_tag("mv") or "(set nahi)"
-            bot.reply_to(message, f"Current Tags:\n• Uday: {u_tag}\n• Maa Vaishno: {m_tag}")
-            return
+whm = re.search(r'working\s*hours?\s*(\d{1,2})(?::(\d{2}))?\s*(?:se|to|-)\s*(\d{1,2})(?::(\d{2}))?', lower)
+if whm and (is_tagged or is_private):
+    if not check_permission("working_hours", admin):
+        bot.reply_to(message, "Ye command sirf admins use kar sakte hain.")
+        return
+    start = int(whm.group(1)) + (int(whm.group(2))/60 if whm.group(2) else 0)
+    end = int(whm.group(3)) + (int(whm.group(4))/60 if whm.group(4) else 0)
+    set_working_hours(start, end)
+    bot.reply_to(message, f"Working hours set: {int(start)}:00 se {int(end)}:00")
+    return
 
-        whm = re.search(r'working\s*hours?\s*(\d{1,2})(?::(\d{2}))?\s*(?:se|to|-)\s*(\d{1,2})(?::(\d{2}))?', lower)
-        if whm and (is_tagged or is_private):
-            if not check_permission("working_hours", admin):
-                bot.reply_to(message, "Ye command sirf admins use kar sakte hain.")
-                return
-            start = int(whm.group(1)) + (int(whm.group(2))/60 if whm.group(2) else 0)
-            end = int(whm.group(3)) + (int(whm.group(4))/60 if whm.group(4) else 0)
-            set_working_hours(start, end)
-            bot.reply_to(message, f"Working hours set: {int(start)}:00 se {int(end)}:00")
-            return
+if ("working hours" in lower or "working hrs" in lower or "kaam ka time" in lower) and any(w in lower for w in ["status", "kitna", "check", "dikhao"]):
+    ws, we = get_working_hours()
+    bot.reply_to(message, f"Current working hours: {int(ws)}:00 se {int(we)}:00")
+    return
+    
+tm = re.search(r'(uday|maa\s*vaishno|mv|vaishno)\s*(?:target|tgt)\s*(\d+)', lower)
+if tm:
+    dist_key = tm.group(1)
+    val = int(tm.group(2))
+else:
+    tm = re.search(r'(?:target|tgt)\s*(?:set\s*)?(uday|maa\s*vaishno|mv|vaishno)\s*(\d+)', lower)
+    if tm:
+        dist_key = tm.group(1)
+        val = int(tm.group(2))
+    else:
+        dist_key = None
+        val = None
+if dist_key and val is not None and (is_tagged or is_private):
+    if not check_permission("target_set", admin):
+        bot.reply_to(message, "Ye command sirf admins use kar sakte hain.")
+        return
+    if "uday" in dist_key:
+        set_target("uday", val)
+        bot.reply_to(message, f"Uday Comm Agr target set: {val}")
+    else:
+        set_target("mv", val)
+        bot.reply_to(message, f"Maa Vaishno Telecom target set: {val}")
+    return
 
-        if ("working hours" in lower or "working hrs" in lower or "kaam ka time" in lower) and any(w in lower for w in ["status", "kitna", "check", "dikhao"]):
-            ws, we = get_working_hours()
-            bot.reply_to(message, f"Current working hours: {int(ws)}:00 se {int(we)}:00")
-            return
+if ("target" in lower or "tgt" in lower) and any(w in lower for w in ["status", "kitna", "check", "dikhao"]):
+    s = get_settings()
+    ws, we = get_working_hours()
+    bot.reply_to(message, f"Current Targets:\nUday Comm Agr: {s.get('target_uday', 0)}\nMaa Vaishno Telecom: {s.get('target_mv', 0)}\n\nWorking hours: {int(ws)}:00 se {int(we)}:00")
+    return
 
-        tm = re.search(r'(uday|maa\s*vaishno|mv|vaishno)\s*(?:target|tgt)\s*(\d+)', lower)
-        if tm:
-            dist_key = tm.group(1)
-            val = int(tm.group(2))
-        else:
-            tm = re.search(r'(?:target|tgt)\s*(?:set\s*)?(uday|maa\s*vaishno|mv|vaishno)\s*(\d+)', lower)
-            if tm:
-                dist_key = tm.group(1)
-                val = int(tm.group(2))
+if any(w in lower for w in ["stock check", "stock alert", "balance check", "low stock", "stock status"]):
+    if not check_permission("stock_check", admin):
+        bot.reply_to(message, "Ye feature currently disabled hai.")
+        return
+    th = get_settings().get("stock_threshold", 3)
+    tm2 = re.search(r'threshold\s*(\d+)', lower)
+    if tm2:
+        th = int(tm2.group(1))
+    bot.reply_to(message, send_stock_check(th))
+    return
+
+stm = re.search(r'stock\s*threshold\s*(\d+)', lower)
+if stm and (is_tagged or is_private):
+    if not check_permission("stock_threshold", admin):
+        bot.reply_to(message, "Ye command sirf admins use kar sakte hain.")
+        return
+    update_setting("stock_threshold", int(stm.group(1)))
+    bot.reply_to(message, f"Stock alert threshold set: {stm.group(1)} din")
+    return
+
+if any(w in lower for w in ["peak hour", "peak hours", "peak time", "kis time sabse zyada", "kab sabse zyada"]):
+    if not check_permission("peak_hours", admin):
+        bot.reply_to(message, "Ye feature currently disabled hai.")
+        return
+    days = 7
+    dm = re.search(r'(\d{1,2})\s*(?:din|days)', lower)
+    if dm:
+        days = int(dm.group(1))
+    bot.reply_to(message, send_peak_hours(days))
+    return
+    
+if any(w in lower for w in ["distributor comparison", "dono distributor", "uday vs", "mv vs", "uday aur mv compare", "kaun better", "kaun aage"]):
+    if not check_permission("distributors", admin):
+        bot.reply_to(message, "Ye feature currently disabled hai.")
+        return
+    if any(w in lower for w in ["aaj", "today", "abhi"]):
+        bot.reply_to(message, send_distributor_comparison(days=1, only_today=True))
+        return
+    days = 7
+    dm = re.search(r'(\d{1,2})\s*(?:din|days)', lower)
+    if dm:
+        days = int(dm.group(1))
+    bot.reply_to(message, send_distributor_comparison(days))
+    return
+
+if any(w in lower for w in ["growth", "growth rate", "kitne percent badha", "kitna badha", "vikas"]):
+    if not check_permission("performance", admin):
+        bot.reply_to(message, "Ye feature currently disabled hai.")
+        return
+    if any(w in lower for w in ["month", "mahine", "mahina"]):
+        bot.reply_to(message, send_growth_rate("month"))
+    else:
+        bot.reply_to(message, send_growth_rate("week"))
+    return
+
+if any(w in lower for w in ["target achievement", "target rate", "kitne din target pura", "achievement rate"]):
+    if not check_permission("performance", admin):
+        bot.reply_to(message, "Ye feature currently disabled hai.")
+        return
+    if any(w in lower for w in ["month", "mahine", "mahina"]):
+        bot.reply_to(message, send_target_achievement("month"))
+    else:
+        bot.reply_to(message, send_target_achievement("week"))
+    return
+
+cr = re.search(r'(uday|mv|maa\s*vaishno|vaishno)\s*(?:ka\s*)?report', lower)
+if cr:
+    if not check_permission("custom_report", admin):
+        bot.reply_to(message, "Ye feature currently disabled hai.")
+        return
+    days = 7
+    dm = re.search(r'(\d{1,2})\s*(?:din|days)', lower)
+    if dm:
+        days = int(dm.group(1))
+    bot.reply_to(message, send_custom_report(cr.group(1), days))
+    return
+
+wants_proj = any(w in lower for w in ["projection", "prediction", "predict", "forecast", "estimate", "anuman"])
+if wants_proj:
+    if not check_permission("projections", admin):
+        bot.reply_to(message, "Ye feature currently disabled hai.")
+        return
+    if any(w in lower for w in ["week", "hafte", "haftey", "hafte ka", "saaptah", "saaptahik"]):
+        bot.reply_to(message, send_projection("week"))
+    elif any(w in lower for w in ["month", "mahine", "mahina", "mahiney", "maasik"]):
+        bot.reply_to(message, send_projection("month"))
+    else:
+        bot.reply_to(message, send_projection("day"))
+    return
+    
+wants_ach = any(w in lower for w in ["ach", "achievement", "achiv", "achiev"])
+if wants_ach:
+    if not check_permission("performance", admin):
+        bot.reply_to(message, "Ye feature currently disabled hai.")
+        return
+    t = extract_time(lower)
+    if t:
+        bot.reply_to(message, send_performance_alert(t[0], t[1]))
+    else:
+        bot.reply_to(message, send_performance_alert())
+    return
+
+perf_triggers = ["performance", "perfomance", "alert"]
+has_perf = any(w in lower for w in perf_triggers)
+has_check_word = any(w in lower for w in ["check", "karo", "do", "batao", "dikhao", "dekho"])
+if has_perf and has_check_word:
+    if not check_permission("performance", admin):
+        bot.reply_to(message, "Ye feature currently disabled hai.")
+        return
+    t = extract_time(lower)
+    if t:
+        bot.reply_to(message, send_performance_alert(t[0], t[1]))
+    else:
+        bot.reply_to(message, send_performance_alert())
+    return
+
+if "till" in lower and any(w in lower for w in ["check", "performance", "perfomance", "alert"]):
+    if not check_permission("performance", admin):
+        bot.reply_to(message, "Ye feature currently disabled hai.")
+        return
+    t = extract_time(lower)
+    if t:
+        bot.reply_to(message, send_performance_alert(t[0], t[1]))
+    else:
+        bot.reply_to(message, send_performance_alert())
+    return
+
+wants_graph = any(w in lower for w in ["graph", "chart"])
+if wants_graph:
+    if not check_permission("graphs", admin):
+        bot.reply_to(message, "Ye feature currently disabled hai.")
+        return
+    days = 7
+    dm = re.search(r'(\d{1,2})\s*(?:din|days)', lower)
+    if dm:
+        days = int(dm.group(1))
+    wants_bar = "bar" in lower or "column" in lower
+    wants_pie = "pie" in lower or "share" in lower or "distribution" in lower
+    wants_line = "line" in lower or "trend" in lower
+    wants_all = any(w in lower for w in ["sabhi", "full", "teeno", "all", "sab", "sare"])
+    bot.send_message(message.chat.id, "Graph ban raha hai...")
+    if wants_all:
+        types_to_send = ["bar", "pie", "line"]
+    elif wants_bar and wants_pie:
+        types_to_send = ["bar", "pie"]
+    elif wants_bar and wants_line:
+        types_to_send = ["bar", "line"]
+    elif wants_pie and wants_line:
+        types_to_send = ["pie", "line"]
+    elif wants_pie:
+        types_to_send = ["pie"]
+    elif wants_line:
+        types_to_send = ["line"]
+    else:
+        types_to_send = ["bar"]
+    for t in types_to_send:
+        try:
+            if t == "bar":
+                url = build_bar_chart(days)
+            elif t == "pie":
+                url = build_pie_chart(days)
             else:
-                dist_key = None
-                val = None
-        if dist_key and val is not None and (is_tagged or is_private):
-            if not check_permission("target_set", admin):
-                bot.reply_to(message, "Ye command sirf admins use kar sakte hain.")
-                return
-            if "uday" in dist_key:
-                set_target("uday", val)
-                bot.reply_to(message, f"Uday Comm Agr target set: {val}")
-            else:
-                set_target("mv", val)
-                bot.reply_to(message, f"Maa Vaishno Telecom target set: {val}")
+                url = build_line_chart(days)
+            bot.send_photo(message.chat.id, url)
+            time.sleep(1)
+        except Exception as ge:
+            bot.send_message(message.chat.id, f"Graph error ({t}): {str(ge)}")
+    return
+    
+    if "weekly" in lower or "hafte ka summary" in lower or "hafte ki summary" in lower:
+        if not check_permission("weekly_summary", admin):
+            bot.reply_to(message, "Ye feature currently disabled hai.")
             return
+        bot.reply_to(message, build_weekly_summary())
+        return
 
-        if ("target" in lower or "tgt" in lower) and any(w in lower for w in ["status", "kitna", "check", "dikhao"]):
-            s = get_settings()
-            ws, we = get_working_hours()
-            bot.reply_to(message, f"Current Targets:\n• Uday Comm Agr: {s.get('target_uday', 0)}\n• Maa Vaishno Telecom: {s.get('target_mv', 0)}\n\nWorking hours: {int(ws)}:00 se {int(we)}:00")
+    wants_compare = any(w in lower for w in ["compare", "farq", "antar", "difference"])
+    if wants_compare:
+        if not check_permission("compare", admin):
+            bot.reply_to(message, "Ye feature currently disabled hai.")
             return
-
-        if any(w in lower for w in ["stock check", "stock alert", "balance check", "low stock", "stock status"]):
-            if not check_permission("stock_check", admin):
-                bot.reply_to(message, "Ye feature currently disabled hai.")
+        parts = re.split(r'\baur\b|\bor\b|\bya\b|\band\b|\bvs\b|\bse\b', lower)
+        anchors = []
+        for part in parts:
+            t = extract_time(part)
+            d = extract_date(part)
+            if t or d:
+                anchors.append((d, t))
+        if len(anchors) >= 2:
+            a1 = anchors[0]
+            a2 = anchors[1]
+            d1 = a1[0] or (datetime.now().date() - timedelta(days=1))
+            d2 = a2[0] or datetime.now().date()
+            t1 = a1[1] or (12, 0)
+            t2 = a2[1] or (12, 0)
+            r1 = find_report_at(d1, t1[0], t1[1])
+            r2 = find_report_at(d2, t2[0], t2[1])
+            if not r1:
+                bot.reply_to(message, f"{d1.strftime('%d %b')} {t1[0]:02d}:{t1[1]:02d} ke aas-paas koi MNP report nahi mili.")
                 return
-            th = get_settings().get("stock_threshold", 3)
-            tm2 = re.search(r'threshold\s*(\d+)', lower)
-            if tm2:
-                th = int(tm2.group(1))
-            bot.reply_to(message, send_stock_check(th))
+            if not r2:
+                bot.reply_to(message, f"{d2.strftime('%d %b')} {t2[0]:02d}:{t2[1]:02d} ke aas-paas koi MNP report nahi mili.")
+                return
+            label_old = f"{d1.strftime('%d %b')} {t1[0]:02d}:{t1[1]:02d}"
+            label_new = f"{d2.strftime('%d %b')} {t2[0]:02d}:{t2[1]:02d}"
+            bot.reply_to(message, format_comparison(r1, r2, label_old, label_new))
             return
-
-        stm = re.search(r'stock\s*threshold\s*(\d+)', lower)
-        if stm and (is_tagged or is_private):
-            if not check_permission("stock_threshold", admin):
-                bot.reply_to(message, "Ye command sirf admins use kar sakte hain.")
-                return
-            update_setting("stock_threshold", int(stm.group(1)))
-            bot.reply_to(message, f"Stock alert threshold set: {stm.group(1)} din")
-            return
-
-        if any(w in lower for w in ["peak hour", "peak hours", "peak time", "kis time sabse zyada", "kab sabse zyada"]):
-            if not check_permission("peak_hours", admin):
-                bot.reply_to(message, "Ye feature currently disabled hai.")
-                return
-            days = 7
-            dm = re.search(r'(\d{1,2})\s*(?:din|days)', lower)
-            if dm:
-                days = int(dm.group(1))
-            bot.reply_to(message, send_peak_hours(days))
-            return
-
-        if any(w in lower for w in ["distributor comparison", "dono distributor", "uday vs", "mv vs", "uday aur mv compare", "kaun better", "kaun aage"]):
-            if not check_permission("distributors", admin):
-                bot.reply_to(message, "Ye feature currently disabled hai.")
-                return
-            if any(w in lower for w in ["aaj", "today", "abhi"]):
-                bot.reply_to(message, send_distributor_comparison(days=1, only_today=True))
-                return
-            days = 7
-            dm = re.search(r'(\d{1,2})\s*(?:din|days)', lower)
-            if dm:
-                days = int(dm.group(1))
-            bot.reply_to(message, send_distributor_comparison(days))
-            return
-
-        if any(w in lower for w in ["growth", "growth rate", "kitne percent badha", "kitna badha", "vikas"]):
-            if not check_permission("performance", admin):
-                bot.reply_to(message, "Ye feature currently disabled hai.")
-                return
-            if any(w in lower for w in ["month", "mahine", "mahina"]):
-                bot.reply_to(message, send_growth_rate("month"))
-            else:
-                bot.reply_to(message, send_growth_rate("week"))
-            return
-
-        if any(w in lower for w in ["target achievement", "target rate", "kitne din target pura", "achievement rate"]):
-            if not check_permission("performance", admin):
-                bot.reply_to(message, "Ye feature currently disabled hai.")
-                return
-            if any(w in lower for w in ["month", "mahine", "mahina"]):
-                bot.reply_to(message, send_target_achievement("month"))
-            else:
-                bot.reply_to(message, send_target_achievement("week"))
-            return
-
-        cr = re.search(r'(uday|mv|maa\s*vaishno|vaishno)\s*(?:ka\s*)?report', lower)
-        if cr:
-            if not check_permission("custom_report", admin):
-                bot.reply_to(message, "Ye feature currently disabled hai.")
-                return
-            days = 7
-            dm = re.search(r'(\d{1,2})\s*(?:din|days)', lower)
-            if dm:
-                days = int(dm.group(1))
-            bot.reply_to(message, send_custom_report(cr.group(1), days))
-            return
-
-        wants_proj = any(w in lower for w in ["projection", "prediction", "predict", "forecast", "estimate", "anuman"])
-        if wants_proj:
-            if not check_permission("projections", admin):
-                bot.reply_to(message, "Ye feature currently disabled hai.")
-                return
-            if any(w in lower for w in ["week", "hafte", "haftey", "hafte ka", "saaptah", "saaptahik"]):
-                bot.reply_to(message, send_projection("week"))
-            elif any(w in lower for w in ["month", "mahine", "mahina", "mahiney", "maasik"]):
-                bot.reply_to(message, send_projection("month"))
-            else:
-                bot.reply_to(message, send_projection("day"))
-            return
-
-        wants_ach = any(w in lower for w in ["ach", "achievement", "achiv", "achiev"])
-        if wants_ach:
-            if not check_permission("performance", admin):
-                bot.reply_to(message, "Ye feature currently disabled hai.")
-                return
-            t = extract_time(lower)
-            if t:
-                bot.reply_to(message, send_performance_alert(t[0], t[1]))
-            else:
-                bot.reply_to(message, send_performance_alert())
-            return
-
-        perf_triggers = ["performance", "perfomance", "alert"]
-        has_perf = any(w in lower for w in perf_triggers)
-        has_check_word = any(w in lower for w in ["check", "karo", "do", "batao", "dikhao", "dekho"])
-        if has_perf and has_check_word:
-            if not check_permission("performance", admin):
-                bot.reply_to(message, "Ye feature currently disabled hai.")
-                return
-            t = extract_time(lower)
-            if t:
-                bot.reply_to(message, send_performance_alert(t[0], t[1]))
-            else:
-                bot.reply_to(message, send_performance_alert())
-            return
-
-        if "till" in lower and any(w in lower for w in ["check", "performance", "perfomance", "alert"]):
-            if not check_permission("performance", admin):
-                bot.reply_to(message, "Ye feature currently disabled hai.")
-                return
-            t = extract_time(lower)
-            if t:
-                bot.reply_to(message, send_performance_alert(t[0], t[1]))
-            else:
-                bot.reply_to(message, send_performance_alert())
-            return
-
-        wants_graph = any(w in lower for w in ["graph", "chart"])
-        if wants_graph:
-            if not check_permission("graphs", admin):
-                bot.reply_to(message, "Ye feature currently disabled hai.")
-                return
-            days = 7
-            dm = re.search(r'(\d{1,2})\s*(?:din|days)', lower)
-            if dm:
-                days = int(dm.group(1))
-            wants_bar = "bar" in lower or "column" in lower
-            wants_pie = "pie" in lower or "share" in lower or "distribution" in lower
-            wants_line = "line" in lower or "trend" in lower
-            wants_all = any(w in lower for w in ["sabhi", "full", "teeno", "all", "sab", "sare"])
-            bot.send_message(message.chat.id, "Graph ban raha hai...")
-            if wants_all:
-                types_to_send = ["bar", "pie", "line"]
-            elif wants_bar and wants_pie:
-                types_to_send = ["bar", "pie"]
-            elif wants_bar and wants_line:
-                types_to_send = ["bar", "line"]
-            elif wants_pie and wants_line:
-                types_to_send = ["pie", "line"]
-            elif wants_pie:
-                types_to_send = ["pie"]
-            elif wants_line:
-                types_to_send = ["line"]
-            else:
-                types_to_send = ["bar"]
-            for t in types_to_send:
-                try:
-                    if t == "bar":
-                        url = build_bar_chart(days)
-                    elif t == "pie":
-                        url = build_pie_chart(days)
-                    else:
-                        url = build_line_chart(days)
-                    bot.send_photo(message.chat.id, url)
-                    time.sleep(1)
-                except Exception as ge:
-                    bot.send_message(message.chat.id, f"Graph error ({t}): {str(ge)}")
-            return
-
-        if "weekly" in lower or "hafte ka summary" in lower or "hafte ki summary" in lower:
-            if not check_permission("weekly_summary", admin):
-                bot.reply_to(message, "Ye feature currently disabled hai.")
-                return
-            bot.reply_to(message, build_weekly_summary())
-            return
-
-        wants_compare = any(w in lower for w in ["compare", "farq", "antar", "difference"])
-        if wants_compare:
-            if not check_permission("compare", admin):
-                bot.reply_to(message, "Ye feature currently disabled hai.")
-                return
-            parts = re.split(r'\baur\b|\bor\b|\bya\b|\band\b|\bvs\b|\bse\b', lower)
-            anchors = []
-            for part in parts:
-                t = extract_time(part)
-                d = extract_date(part)
-                if t or d:
-                    anchors.append((d, t))
-            if len(anchors) >= 2:
-                a1 = anchors[0]
-                a2 = anchors[1]
-                d1 = a1[0] or (datetime.now().date() - timedelta(days=1))
-                d2 = a2[0] or datetime.now().date()
-                t1 = a1[1] or (12, 0)
-                t2 = a2[1] or (12, 0)
-                r1 = find_report_at(d1, t1[0], t1[1])
-                r2 = find_report_at(d2, t2[0], t2[1])
-                if not r1:
-                    bot.reply_to(message, f"{d1.strftime('%d %b')} {t1[0]:02d}:{t1[1]:02d} ke aas-paas koi MNP report nahi mili.")
-                    return
-                if not r2:
-                    bot.reply_to(message, f"{d2.strftime('%d %b')} {t2[0]:02d}:{t2[1]:02d} ke aas-paas koi MNP report nahi mili.")
-                    return
-                label_old = f"{d1.strftime('%d %b')} {t1[0]:02d}:{t1[1]:02d}"
-                label_new = f"{d2.strftime('%d %b')} {t2[0]:02d}:{t2[1]:02d}"
-                bot.reply_to(message, format_comparison(r1, r2, label_old, label_new))
-                return
-            db = get_db()
-            last_two = list(db.find({"text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", -1).limit(2))
-            if len(last_two) >= 2:
-                r1 = last_two[1]
-                r2 = last_two[0]
-                            bot.reply_to(message, format_comparison(r1, r2))
+        db = get_db()
+        last_two = list(db.find({"text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", -1).limit(2))
+        if len(last_two) >= 2:
+            r1 = last_two[1]
+            r2 = last_two[0]
+            bot.reply_to(message, format_comparison(r1, r2))
             return
         else:
             bot.reply_to(message, "Database mein kam se kam 2 MNP reports chahiye.")
@@ -1434,7 +1433,7 @@ except Exception as e:
         bot.reply_to(message, "Error: " + str(e))
     except:
         pass
-        
+       
 
 BUTTON_PERM_MAP = {
     "graph_bar": "graphs",
@@ -1484,7 +1483,7 @@ def callback_handler(call):
         elif data == "tgt_status":
             s = get_settings()
             ws, we = get_working_hours()
-            bot.send_message(cid, f"Current Targets:\n• Uday: {s.get('target_uday', 0)}\n• Maa Vaishno: {s.get('target_mv', 0)}\n\nWorking hours: {int(ws)}:00 se {int(we)}:00")
+            bot.send_message(cid, f"Current Targets:\nUday: {s.get('target_uday', 0)}\nMaa Vaishno: {s.get('target_mv', 0)}\n\nWorking hours: {int(ws)}:00 se {int(we)}:00")
         elif data == "stock_check":
             th = get_settings().get("stock_threshold", 3)
             bot.send_message(cid, send_stock_check(th))
@@ -1499,7 +1498,6 @@ def callback_handler(call):
             bot.send_message(call.message.chat.id, "Error: " + str(e))
         except:
             pass
-
 
 @app.route('/', methods=['POST'])
 def webhook():
