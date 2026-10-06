@@ -58,8 +58,25 @@ def set_working_hours(start, end):
     db = get_db()
     db.update_one({"_id": "settings"}, {"$set": {"wh_start": start, "wh_end": end}}, upsert=True)
 
+# ============ STOCK ALERT HELPERS ============
+MSISDN_MAP = {
+    "9997389467": "Uday Comm Agr",
+    "7895110381": "Maa Vaishno Telecom",
+}
+
+def get_tag(distributor_key):
+    s = get_settings()
+    return s.get(f"tag_{distributor_key}", "")
+
+def set_tag(distributor_key, username):
+    db = get_db()
+    if username and not username.startswith("@"):
+        username = "@" + username
+    db.update_one({"_id": "settings"}, {"$set": {f"tag_{distributor_key}": username}}, upsert=True)
+
 app = Flask(__name__)
 
+# ============ PATTERNS ============
 DIST_PATTERN = re.compile(
     r'Dist\s+([A-Za-z0-9 &\.\-\']+?)\s*-\s*\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)\s*/\s*\((\d+)\)'
 )
@@ -68,7 +85,9 @@ TOTAL_PATTERN = re.compile(
     re.MULTILINE
 )
 TIME_PATTERN = re.compile(r'till\s+(\d{1,2})[:\.](\d{2})')
+BALANCE_PATTERN = re.compile(r'(\d{10})\s*/\s*(\d+)\s*/\s*(\d+)\s*/\s*([\d\.]+)')
 
+# ============ PARSERS ============
 def parse_report(text):
     if not text or ("FTA MNP" not in text and "FTD" not in text):
         return None
@@ -96,6 +115,21 @@ def parse_report(text):
         report_time = f"{int(rtm.group(1)):02d}:{rtm.group(2)}"
     return {"distributors": distributors, "total": total, "report_time": report_time}
 
+def parse_balance_report(text):
+    if not text or "Distributor Balance Report" not in text:
+        return None
+    items = []
+    for m in BALANCE_PATTERN.finditer(text):
+        items.append({
+            "msisdn": m.group(1),
+            "balance": int(m.group(2)),
+            "sale_lakh": int(m.group(3)),
+            "stock_days": float(m.group(4)),
+        })
+    if not items:
+        return None
+    return {"items": items}
+
 def save_report(text, timestamp):
     try:
         parsed = parse_report(text)
@@ -111,6 +145,24 @@ def save_report(text, timestamp):
     except Exception as e:
         print("DB SAVE ERROR:", str(e))
 
+def save_balance_report(text, timestamp):
+    try:
+        parsed = parse_balance_report(text)
+        if not parsed:
+            return None
+        db = get_db()
+        db.insert_one({
+            "text": text,
+            "timestamp": timestamp,
+            "date_str": ts_to_ist_str(timestamp),
+            "type": "balance",
+            "parsed": parsed,
+        })
+        return parsed
+    except Exception as e:
+        print("BAL SAVE ERROR:", str(e))
+        return None
+        
 def format_comparison(r_old, r_new, label_old="Pehle", label_new="Ab"):
     p_old = r_old.get("parsed") or parse_report(r_old.get("text", ""))
     p_new = r_new.get("parsed") or parse_report(r_new.get("text", ""))
@@ -169,7 +221,7 @@ def get_daily_data(days=7):
         dist_totals_week["Uday Comm Agr"] = dist_totals_week.get("Uday Comm Agr", 0) + uday
         dist_totals_week["Maa Vaishno Telecom"] = dist_totals_week.get("Maa Vaishno Telecom", 0) + mv
     return {"labels": days_list, "uday": uday_vals, "mv": mv_vals, "total": total_vals, "dist_totals": dist_totals_week}
-    
+
 def quickchart_url(config, width=800, height=400):
     encoded = urllib.parse.quote(json.dumps(config))
     return f"https://quickchart.io/chart?c={encoded}&w={width}&h={height}&bkg=white&plugins=chartjs-plugin-datalabels"
@@ -268,7 +320,7 @@ def build_weekly_summary():
         lines.append(f"🏆 Best day: {best[0]} ({best[1]})")
         lines.append(f"📉 Lowest: {worst[0]} ({worst[1]})")
     return "\n".join(lines)
-
+    
 MONTHS = {"jan":1,"january":1,"feb":2,"february":2,"mar":3,"march":3,"apr":4,"april":4,"may":5,"jun":6,"june":6,"jul":7,"july":7,"aug":8,"august":8,"sep":9,"sept":9,"september":9,"oct":10,"october":10,"nov":11,"november":11,"dec":12,"december":12}
 
 def extract_time(text):
@@ -336,7 +388,7 @@ def find_report_at(target_date, hour, minute):
     except Exception as e:
         print("FIND ERROR:", str(e))
         return None
-        
+
 def send_performance_alert(target_hour=None, target_minute=None):
     settings = get_settings()
     target_uday = settings.get("target_uday", 0)
@@ -374,9 +426,11 @@ def send_performance_alert(target_hour=None, target_minute=None):
         if uday_now < target_uday:
             gap = target_uday - uday_now
             pct = int((uday_now / target_uday) * 100)
-            alerts.append(f"• Uday Comm Agr: {uday_now}/{target_uday} ({pct}%) — gap {gap}")
+            uday_tag = get_tag("uday")
+            ts = f" {uday_tag}" if uday_tag else ""
+            alerts.append(f"• Uday Comm Agr{ts}: {uday_now}/{target_uday} ({pct}%) — gap {gap}")
             if settings.get("last_fail_uday") == yesterday_str:
-                extra_alerts.append("❗ Uday Comm Agr — aap aaj bhi target pura nahi kar paye!")
+                extra_alerts.append(f"❗ Uday Comm Agr{ts} — aap aaj bhi target pura nahi kar paye!")
             update_setting("last_fail_uday", today_str)
         else:
             update_setting("last_fail_uday", "")
@@ -384,9 +438,11 @@ def send_performance_alert(target_hour=None, target_minute=None):
         if mv_now < target_mv:
             gap = target_mv - mv_now
             pct = int((mv_now / target_mv) * 100)
-            alerts.append(f"• Maa Vaishno Telecom: {mv_now}/{target_mv} ({pct}%) — gap {gap}")
+            mv_tag = get_tag("mv")
+            ts = f" {mv_tag}" if mv_tag else ""
+            alerts.append(f"• Maa Vaishno Telecom{ts}: {mv_now}/{target_mv} ({pct}%) — gap {gap}")
             if settings.get("last_fail_mv") == yesterday_str:
-                extra_alerts.append("❗ Maa Vaishno Telecom — aap aaj bhi target pura nahi kar paye!")
+                extra_alerts.append(f"❗ Maa Vaishno Telecom{ts} — aap aaj bhi target pura nahi kar paye!")
             update_setting("last_fail_mv", today_str)
         else:
             update_setting("last_fail_mv", "")
@@ -404,6 +460,51 @@ def send_performance_alert(target_hour=None, target_minute=None):
         msg += f"• Uday Comm Agr: {uday_now}/{target_uday}\n• Maa Vaishno Telecom: {mv_now}/{target_mv}"
         return msg
 
+def build_balance_alert(parsed_items, threshold=3):
+    if not parsed_items:
+        return None
+    low_items = []
+    for item in parsed_items.get("items", []):
+        name = MSISDN_MAP.get(item["msisdn"])
+        if not name:
+            continue
+        if item["stock_days"] < threshold:
+            dist_key = "uday" if "uday" in name.lower() else "mv"
+            tag = get_tag(dist_key)
+            tag_str = f" {tag}" if tag else ""
+            low_items.append({
+                "name": name, "tag_str": tag_str,
+                "days": item["stock_days"], "balance": item["balance"], "sale": item["sale_lakh"],
+            })
+    if not low_items:
+        return None
+    lines = ["🚨 Low Balance Alert", ""]
+    for it in low_items:
+        lines.append(f"🔸 {it['name']}{it['tag_str']}")
+        lines.append(f"   Stock Days: {it['days']}")
+        lines.append(f"   Balance: {it['balance']:,}")
+        lines.append(f"   Sale: {it['sale']} Lakh")
+        lines.append("")
+    lines.append(f"⚠️ Aapka balance {threshold} din se kam hai — aaj hi billing karayen!")
+    return "\n".join(lines)
+
+def send_stock_check(threshold=3):
+    db = get_db()
+    latest = list(db.find({"type": "balance"}).sort("timestamp", -1).limit(1))
+    if not latest:
+        return "❌ Koi balance report nahi mili."
+    parsed = latest[0].get("parsed")
+    if not parsed:
+        return "❌ Balance report parse nahi ho paayi."
+    alert = build_balance_alert(parsed, threshold)
+    if alert:
+        return alert
+    lines = ["✅ Sab distributors ka stock theek hai", ""]
+    for item in parsed.get("items", []):
+        name = MSISDN_MAP.get(item["msisdn"], item["msisdn"])
+        lines.append(f"• {name}: {item['stock_days']} din")
+    return "\n".join(lines)
+    
 def get_historical_daily_avg(days=30, exclude_today=True):
     now = datetime.now()
     end_date = now.date() - timedelta(days=1) if exclude_today else now.date()
@@ -516,11 +617,8 @@ def send_projection(period="day"):
         proj = month_total + (best_avg * remaining_days)
         return f"📅 Monthly Projection ({month_start.strftime('%b %Y')})\n\nAbhi tak: {month_total} ({days_done} din)\nDaily avg: {int(avg_this_month)}/din\nBache hue {remaining_days} din: ~{int(best_avg * remaining_days)}\n\nExpected month total: ~{int(proj)}"
     return "❌ Period samjha nahi."
-    
-# ============ BATCH 1: NEW ANALYTICS ============
 
 def send_peak_hours(days=7):
-    """2.a - Peak hours analysis"""
     now = datetime.now()
     start = now - timedelta(days=days-1)
     utc_start = start.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() - IST_OFFSET
@@ -546,8 +644,7 @@ def send_peak_hours(days=7):
             delta = cur_total - prev_total
             if delta > 0:
                 ist_dt = datetime.fromtimestamp(r["timestamp"] + IST_OFFSET)
-                hour = ist_dt.hour
-                hourly[hour] = hourly.get(hour, 0) + delta
+                hourly[ist_dt.hour] = hourly.get(ist_dt.hour, 0) + delta
             prev_total = cur_total
     if not hourly:
         return "❌ Data parse nahi ho paaya."
@@ -557,8 +654,9 @@ def send_peak_hours(days=7):
         lines.append(f"• {h:02d}:00 - {h+1:02d}:00 → {count} MNP")
     return "\n".join(lines)
 
-def send_distributor_comparison(days=7):
-    """2.b - Distributor comparison"""
+def send_distributor_comparison(days=7, only_today=False):
+    if only_today:
+        days = 1
     data = get_daily_data(days)
     uday_total = sum(data["uday"])
     mv_total = sum(data["mv"])
@@ -567,13 +665,15 @@ def send_distributor_comparison(days=7):
     total = uday_total + mv_total
     uday_pct = int((uday_total / total) * 100) if total else 0
     mv_pct = int((mv_total / total) * 100) if total else 0
-    days_with_data = len([x for x in data["total"] if x > 0])
-    uday_avg = int(uday_total / days_with_data) if days_with_data else 0
-    mv_avg = int(mv_total / days_with_data) if days_with_data else 0
+    uday_avg = int(uday_total / days)
+    mv_avg = int(mv_total / days)
     uday_best_idx = data["uday"].index(max(data["uday"])) if data["uday"] else 0
     mv_best_idx = data["mv"].index(max(data["mv"])) if data["mv"] else 0
     winner = "Uday Comm Agr" if uday_total > mv_total else ("Maa Vaishno Telecom" if mv_total > uday_total else "Tie")
-    lines = [f"⚖️ Distributor Comparison (last {days} days)", ""]
+    if only_today:
+        lines = [f"⚖️ Distributor Comparison (AAJ)", ""]
+    else:
+        lines = [f"⚖️ Distributor Comparison (last {days} days)", ""]
     lines.append(f"🔵 Uday Comm Agr: {uday_total} ({uday_pct}%)")
     lines.append(f"   Avg: {uday_avg}/din | Best: {data['labels'][uday_best_idx]} ({max(data['uday'])})")
     lines.append("")
@@ -584,7 +684,6 @@ def send_distributor_comparison(days=7):
     return "\n".join(lines)
 
 def send_growth_rate(period="week"):
-    """2.c - Growth rate"""
     db = get_db()
     now = datetime.now()
     today = now.date()
@@ -637,7 +736,6 @@ def send_growth_rate(period="week"):
     return "❌ Period samjha nahi."
 
 def send_target_achievement(period="month"):
-    """2.d - Target achievement rate"""
     settings = get_settings()
     target_uday = settings.get("target_uday", 0)
     target_mv = settings.get("target_mv", 0)
@@ -682,7 +780,6 @@ def send_target_achievement(period="month"):
     return "\n".join(lines)
 
 def send_custom_report(distributor, days=7):
-    """7.a - Custom distributor report"""
     data = get_daily_data(days)
     dist_lower = distributor.lower()
     if "uday" in dist_lower:
@@ -762,6 +859,13 @@ def handle(message):
         msg_ts = message.date
         if message.chat.id == int(GROUP_CHAT_ID) and ("FTA MNP" in text or "FTD" in text):
             save_report(text, msg_ts)
+        if message.chat.id == int(GROUP_CHAT_ID) and "Distributor Balance Report" in text:
+            parsed = save_balance_report(text, msg_ts)
+            if parsed:
+                alert = build_balance_alert(parsed, 3)
+                if alert:
+                    bot.send_message(GROUP_CHAT_ID, alert)
+            return
         is_private = message.chat.type == "private"
         is_tagged = BOT_USERNAME.lower() in text.lower()
         is_reply_to_bot = False
@@ -773,6 +877,44 @@ def handle(message):
             return
         clean_text = text.replace(BOT_USERNAME, "").strip() or "Hi"
         lower = clean_text.lower()
+
+        # MENU with Inline Buttons
+        if lower.strip() in ["/start", "/menu", "menu", "start", "help", "commands"]:
+            from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+            kb = InlineKeyboardMarkup(row_width=2)
+            kb.add(
+                InlineKeyboardButton("📊 Bar Graph", callback_data="graph_bar"),
+                InlineKeyboardButton("🥧 Pie Chart", callback_data="graph_pie"),
+                InlineKeyboardButton("📈 Line Chart", callback_data="graph_line"),
+                InlineKeyboardButton("📉 Aaj Projection", callback_data="proj_day"),
+                InlineKeyboardButton("📊 Weekly Proj", callback_data="proj_week"),
+                InlineKeyboardButton("📅 Monthly Proj", callback_data="proj_month"),
+                InlineKeyboardButton("⚠️ Performance", callback_data="perf_check"),
+                InlineKeyboardButton("🎯 Target Status", callback_data="tgt_status"),
+                InlineKeyboardButton("🚨 Stock Check", callback_data="stock_check"),
+                InlineKeyboardButton("📋 Weekly Summary", callback_data="weekly_summary"),
+                InlineKeyboardButton("🏆 Peak Hours", callback_data="peak_hours"),
+                InlineKeyboardButton("⚖️ Distributors", callback_data="dist_compare"),
+            )
+            bot.reply_to(message, "🤖 DTR Mainpuri Bot Menu\n\nKya dekhna chahte ho?", reply_markup=kb)
+            return
+
+        # TAG SET
+        tagm = re.search(r'(uday|mv|maa\s*vaishno|vaishno)\s*tag\s*(@?[\w_]+)', lower)
+        if tagm and (is_tagged or is_private):
+            dist_key_raw = tagm.group(1)
+            username = tagm.group(2)
+            dist_key = "uday" if "uday" in dist_key_raw else "mv"
+            set_tag(dist_key, username)
+            display = "Uday Comm Agr" if dist_key == "uday" else "Maa Vaishno Telecom"
+            bot.reply_to(message, f"✅ {display} ke alerts mein ab {username} tag hoga.")
+            return
+
+        if ("tag" in lower) and any(w in lower for w in ["status", "dikhao", "check"]) and (is_tagged or is_private):
+            u_tag = get_tag("uday") or "(set nahi)"
+            m_tag = get_tag("mv") or "(set nahi)"
+            bot.reply_to(message, f"🏷️ Current Tags:\n• Uday: {u_tag}\n• Maa Vaishno: {m_tag}")
+            return
 
         # WORKING HOURS
         whm = re.search(r'working\s*hours?\s*(\d{1,2})(?::(\d{2}))?\s*(?:se|to|-)\s*(\d{1,2})(?::(\d{2}))?', lower)
@@ -813,8 +955,21 @@ def handle(message):
             bot.reply_to(message, f"🎯 Current Targets:\n• Uday Comm Agr: {s.get('target_uday', 0)}\n• Maa Vaishno Telecom: {s.get('target_mv', 0)}\n\n⏰ Working hours: {int(ws)}:00 se {int(we)}:00")
             return
 
-        # BATCH 1: NEW ANALYTICS
-        # 2.a Peak Hours
+        # STOCK CHECK / THRESHOLD
+        if any(w in lower for w in ["stock check", "stock alert", "balance check", "low stock", "stock status"]):
+            th = get_settings().get("stock_threshold", 3)
+            tm2 = re.search(r'threshold\s*(\d+)', lower)
+            if tm2: th = int(tm2.group(1))
+            bot.reply_to(message, send_stock_check(th))
+            return
+
+        stm = re.search(r'stock\s*threshold\s*(\d+)', lower)
+        if stm and (is_tagged or is_private):
+            update_setting("stock_threshold", int(stm.group(1)))
+            bot.reply_to(message, f"✅ Stock alert threshold set: {stm.group(1)} din")
+            return
+
+        # PEAK HOURS
         if any(w in lower for w in ["peak hour", "peak hours", "peak time", "kis time sabse zyada", "kab sabse zyada"]):
             days = 7
             dm = re.search(r'(\d{1,2})\s*(?:din|days)', lower)
@@ -822,15 +977,18 @@ def handle(message):
             bot.reply_to(message, send_peak_hours(days))
             return
 
-        # 2.b Distributor Comparison
+        # DISTRIBUTOR COMPARISON
         if any(w in lower for w in ["distributor comparison", "dono distributor", "uday vs", "mv vs", "uday aur mv compare", "kaun better", "kaun aage"]):
+            if any(w in lower for w in ["aaj", "today", "abhi"]):
+                bot.reply_to(message, send_distributor_comparison(days=1, only_today=True))
+                return
             days = 7
             dm = re.search(r'(\d{1,2})\s*(?:din|days)', lower)
             if dm: days = int(dm.group(1))
             bot.reply_to(message, send_distributor_comparison(days))
             return
 
-        # 2.c Growth Rate
+        # GROWTH
         if any(w in lower for w in ["growth", "growth rate", "kitne percent badha", "kitna badha", "vikas"]):
             if any(w in lower for w in ["month", "mahine", "mahina"]):
                 bot.reply_to(message, send_growth_rate("month"))
@@ -838,7 +996,7 @@ def handle(message):
                 bot.reply_to(message, send_growth_rate("week"))
             return
 
-        # 2.d Target Achievement Rate
+        # TARGET ACHIEVEMENT
         if any(w in lower for w in ["target achievement", "target rate", "kitne din target pura", "achievement rate"]):
             if any(w in lower for w in ["month", "mahine", "mahina"]):
                 bot.reply_to(message, send_target_achievement("month"))
@@ -846,9 +1004,9 @@ def handle(message):
                 bot.reply_to(message, send_target_achievement("week"))
             return
 
-        # 7.a Custom Report
+        # CUSTOM REPORT
         cr = re.search(r'(uday|mv|maa\s*vaishno|vaishno)\s*(?:ka\s*)?report', lower)
-        if cr and ("report" in lower or "raport" in lower):
+        if cr:
             days = 7
             dm = re.search(r'(\d{1,2})\s*(?:din|days)', lower)
             if dm: days = int(dm.group(1))
@@ -986,6 +1144,45 @@ def handle(message):
     except Exception as e:
         try:
             bot.reply_to(message, "Error: " + str(e))
+        except:
+            pass
+            
+@bot.callback_query_handler(func=lambda call: True)
+def callback_handler(call):
+    try:
+        bot.answer_callback_query(call.id)
+        cid = call.message.chat.id
+        data = call.data
+        if data == "graph_bar":
+            bot.send_photo(cid, build_bar_chart(7))
+        elif data == "graph_pie":
+            bot.send_photo(cid, build_pie_chart(7))
+        elif data == "graph_line":
+            bot.send_photo(cid, build_line_chart(7))
+        elif data == "proj_day":
+            bot.send_message(cid, send_projection("day"))
+        elif data == "proj_week":
+            bot.send_message(cid, send_projection("week"))
+        elif data == "proj_month":
+            bot.send_message(cid, send_projection("month"))
+        elif data == "perf_check":
+            bot.send_message(cid, send_performance_alert())
+        elif data == "tgt_status":
+            s = get_settings()
+            ws, we = get_working_hours()
+            bot.send_message(cid, f"🎯 Current Targets:\n• Uday: {s.get('target_uday', 0)}\n• Maa Vaishno: {s.get('target_mv', 0)}\n\n⏰ Working hours: {int(ws)}:00 se {int(we)}:00")
+        elif data == "stock_check":
+            th = get_settings().get("stock_threshold", 3)
+            bot.send_message(cid, send_stock_check(th))
+        elif data == "weekly_summary":
+            bot.send_message(cid, build_weekly_summary())
+        elif data == "peak_hours":
+            bot.send_message(cid, send_peak_hours(7))
+        elif data == "dist_compare":
+            bot.send_message(cid, send_distributor_comparison(7))
+    except Exception as e:
+        try:
+            bot.send_message(call.message.chat.id, "Error: " + str(e))
         except:
             pass
 
