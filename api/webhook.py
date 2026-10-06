@@ -51,12 +51,22 @@ def save_report_endpoint():
 @app.route('/daily-quote', methods=['GET'])
 def daily_quote():
     try:
-        bot.send_message(GROUP_CHAT_ID, "🌅 Good Morning Sir & Team")
+        bot.send_message(GROUP_CHAT_ID, "🌅 Good Morning Team")
         time.sleep(1)
+
         response = client.chat.completions.create(
             messages=[
-                {"role": "system", "content": "Generate ONE short work-related motivational quote in Hindi (Devanagari script only). Just the quote — no greeting, no extra text, no author name."},
-                {"role": "user", "content": "Give me a new work motivational quote for today."}
+                {
+                    "role": "system",
+                    "content": (
+                        "Generate a work-related motivational message in Hindi (Devanagari script). "
+                        "It must be 2-3 lines long, about teamwork, hard work, or success. "
+                        "Do NOT include any greeting like 'Namaste' or 'Hi'. "
+                        "Do NOT include author names. "
+                        "Just the motivational lines."
+                    )
+                },
+                {"role": "user", "content": "Give me today's work motivational message."}
             ],
             model="openai/gpt-oss-20b",
         )
