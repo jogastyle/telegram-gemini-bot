@@ -25,11 +25,30 @@ IST_OFFSET = 5 * 3600 + 30 * 60
 def ts_to_ist_str(ts):
     return time.strftime("%Y-%m-%d %H:%M", time.gmtime(ts + IST_OFFSET))
 
+def today_ist_str():
+    return time.strftime("%Y-%m-%d", time.gmtime(time.time() + IST_OFFSET))
+
+def yesterday_ist_str():
+    return time.strftime("%Y-%m-%d", time.gmtime(time.time() + IST_OFFSET - 86400))
+
 def get_db():
     global _db_client
     if _db_client is None:
         _db_client = MongoClient(MONGO_URL, serverSelectionTimeoutMS=5000)
     return _db_client["telegram_bot"]["reports"]
+
+def get_settings():
+    db = get_db()
+    s = db.find_one({"_id": "settings"})
+    return s or {}
+
+def set_target(distributor, value):
+    db = get_db()
+    db.update_one({"_id": "settings"}, {"$set": {f"target_{distributor}": value}}, upsert=True)
+
+def update_setting(key, value):
+    db = get_db()
+    db.update_one({"_id": "settings"}, {"$set": {key: value}}, upsert=True)
 
 app = Flask(__name__)
 
@@ -116,7 +135,6 @@ def format_comparison(r_old, r_new, label_old="Pehle", label_new="Ab"):
 
 # ================= DATA FOR GRAPHS =================
 def get_daily_data(days=7):
-    """Last N days ka per-day data (distributor-wise + total)."""
     now = datetime.now()
     start = now - timedelta(days=days - 1)
     utc_start = start.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() - IST_OFFSET
@@ -127,13 +145,11 @@ def get_daily_data(days=7):
         "text": {"$regex": "FTA MNP|FTD"}
     }).sort("timestamp", 1))
 
-    # Group by IST date, take the LAST report of each day (cumulative counts)
     daily_last = {}
     for r in reports:
         day_key = time.strftime("%Y-%m-%d", time.gmtime(r["timestamp"] + IST_OFFSET))
         daily_last[day_key] = r
 
-    # Build data structure
     days_list = []
     uday_vals = []
     mv_vals = []
@@ -148,26 +164,19 @@ def get_daily_data(days=7):
 
         r = daily_last.get(key)
         if not r:
-            uday_vals.append(0)
-            mv_vals.append(0)
-            total_vals.append(0)
+            uday_vals.append(0); mv_vals.append(0); total_vals.append(0)
             continue
 
         p = r.get("parsed") or parse_report(r.get("text", ""))
         if not p:
-            uday_vals.append(0)
-            mv_vals.append(0)
-            total_vals.append(0)
+            uday_vals.append(0); mv_vals.append(0); total_vals.append(0)
             continue
 
         uday = p["distributors"].get("Uday Comm Agr", {}).get("total", 0)
         mv = p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
         tot = (p.get("total") or {}).get("total", 0)
 
-        uday_vals.append(uday)
-        mv_vals.append(mv)
-        total_vals.append(tot)
-
+        uday_vals.append(uday); mv_vals.append(mv); total_vals.append(tot)
         dist_totals_week["Uday Comm Agr"] = dist_totals_week.get("Uday Comm Agr", 0) + uday
         dist_totals_week["Maa Vaishno Telecom"] = dist_totals_week.get("Maa Vaishno Telecom", 0) + mv
 
@@ -179,7 +188,7 @@ def get_daily_data(days=7):
         "dist_totals": dist_totals_week,
     }
 
-# ================= GRAPH BUILDERS (QuickChart) =================
+# ================= GRAPH BUILDERS =================
 def quickchart_url(config, width=800, height=400):
     encoded = urllib.parse.quote(json.dumps(config))
     return f"https://quickchart.io/chart?c={encoded}&w={width}&h={height}&bkg=white"
@@ -199,7 +208,6 @@ def build_bar_chart(days=7):
         "options": {
             "title": {"display": True, "text": f"Daily MNP - Last {days} Days", "fontSize": 16},
             "legend": {"position": "bottom"},
-            "plugins": {"datalabels": {"display": True, "color": "black", "font": {"bold": True}}},
         }
     }
     return quickchart_url(config)
@@ -213,10 +221,7 @@ def build_pie_chart(days=7):
         "type": "doughnut",
         "data": {
             "labels": labels,
-            "datasets": [{
-                "data": values,
-                "backgroundColor": ["#2196F3", "#F44336", "#4CAF50", "#FFC107"],
-            }]
+            "datasets": [{"data": values, "backgroundColor": ["#2196F3", "#F44336", "#4CAF50", "#FFC107"]}]
         },
         "options": {
             "title": {"display": True, "text": f"Distributor Share - Last {days} Days", "fontSize": 16},
@@ -253,7 +258,7 @@ def build_weekly_summary():
 
     lines = []
     lines.append("📊 Weekly MNP Summary")
-    lines.append(f"(Last 7 days)")
+    lines.append("(Last 7 days)")
     lines.append("")
     lines.append("Distributor-wise total:")
     for name, val in sorted(dist_totals.items(), key=lambda x: -x[1]):
@@ -347,6 +352,86 @@ def find_report_at(target_date, hour, minute):
         print("FIND ERROR:", str(e))
         return None
 
+# ================= PERFORMANCE CHECK =================
+@app.route('/check-performance', methods=['GET'])
+def check_performance():
+    try:
+        settings = get_settings()
+        target_uday = settings.get("target_uday", 0)
+        target_mv = settings.get("target_mv", 0)
+
+        if not target_uday and not target_mv:
+            return "No targets set", 200
+
+        now = datetime.now()
+        today_start_ist = datetime.combine(now.date(), datetime.min.time()).timestamp()
+        utc_start = today_start_ist - IST_OFFSET
+
+        db = get_db()
+        reports = list(db.find({
+            "timestamp": {"$gte": utc_start},
+            "text": {"$regex": "FTA MNP|FTD"}
+        }).sort("timestamp", -1).limit(1))
+
+        if not reports:
+            bot.send_message(GROUP_CHAT_ID, "⚠️ Alert: Aaj koi MNP report nahi aayi.")
+            return "No reports", 200
+
+        p = reports[0].get("parsed") or parse_report(reports[0]["text"])
+        uday_now = p["distributors"].get("Uday Comm Agr", {}).get("total", 0)
+        mv_now = p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
+
+        today_str = today_ist_str()
+        yesterday_str = yesterday_ist_str()
+
+        alerts = []
+        extra_alerts = []
+
+        # ---- Uday check ----
+        if target_uday:
+            if uday_now < target_uday:
+                gap = target_uday - uday_now
+                pct = int((uday_now / target_uday) * 100)
+                alerts.append(f"• Uday Comm Agr: {uday_now}/{target_uday} ({pct}%) — gap {gap}")
+
+                # Consecutive failure check
+                last_fail = settings.get("last_fail_uday")
+                if last_fail == yesterday_str:
+                    extra_alerts.append("❗ Uday Comm Agr — aap aaj bhi target pura nahi kar paye!")
+                update_setting("last_fail_uday", today_str)
+            else:
+                # Reset fail count on success
+                update_setting("last_fail_uday", "")
+
+        # ---- Maa Vaishno check ----
+        if target_mv:
+            if mv_now < target_mv:
+                gap = target_mv - mv_now
+                pct = int((mv_now / target_mv) * 100)
+                alerts.append(f"• Maa Vaishno Telecom: {mv_now}/{target_mv} ({pct}%) — gap {gap}")
+
+                last_fail = settings.get("last_fail_mv")
+                if last_fail == yesterday_str:
+                    extra_alerts.append("❗ Maa Vaishno Telecom — aap aaj bhi target pura nahi kar paye!")
+                update_setting("last_fail_mv", today_str)
+            else:
+                update_setting("last_fail_mv", "")
+
+        if alerts:
+            msg = "⚠️ Low Performance Alert\n\n" + "\n".join(alerts)
+            if extra_alerts:
+                msg += "\n\n" + "\n".join(extra_alerts)
+            if target_uday and uday_now >= target_uday:
+                msg += "\n\n✅ Uday Comm Agr ne target pura kar liya!"
+            if target_mv and mv_now >= target_mv:
+                msg += "\n✅ Maa Vaishno Telecom ne target pura kar liya!"
+            bot.send_message(GROUP_CHAT_ID, msg)
+            return "Alert sent", 200
+        else:
+            return "All targets achieved", 200
+    except Exception as e:
+        return "Error: " + str(e), 500
+
 # ================= ENDPOINTS =================
 @app.route('/daily-quote', methods=['GET'])
 def daily_quote():
@@ -408,6 +493,40 @@ def handle(message):
         clean_text = text.replace(BOT_USERNAME, "").strip() or "Hi"
         lower = clean_text.lower()
 
+        # -------- SET TARGET (per distributor) --------
+        tm = re.search(r'(uday|maa\s*vaishno|mv|vaishno)\s*target\s*(\d+)', lower)
+        if tm:
+            dist_key = tm.group(1)
+            val = int(tm.group(2))
+        else:
+            tm = re.search(r'target\s*(?:set\s*)?(uday|maa\s*vaishno|mv|vaishno)\s*(\d+)', lower)
+            if tm:
+                dist_key = tm.group(1)
+                val = int(tm.group(2))
+            else:
+                dist_key = None
+                val = None
+
+        if dist_key and val is not None and (is_tagged or is_private):
+            if "uday" in dist_key:
+                set_target("uday", val)
+                bot.reply_to(message, f"✅ Uday Comm Agr target set: {val}\n\nRoz sham 7 baje check hoga.")
+            else:
+                set_target("mv", val)
+                bot.reply_to(message, f"✅ Maa Vaishno Telecom target set: {val}\n\nRoz sham 7 baje check hoga.")
+            return
+
+        # -------- CHECK TARGET STATUS --------
+        if "target" in lower and any(w in lower for w in ["status", "kitna", "check", "dikhao"]):
+            s = get_settings()
+            tu = s.get("target_uday", 0)
+            tmv = s.get("target_mv", 0)
+            bot.reply_to(message,
+                f"🎯 Current Targets:\n"
+                f"• Uday Comm Agr: {tu}\n"
+                f"• Maa Vaishno Telecom: {tmv}")
+            return
+
         # -------- GRAPH REQUESTS --------
         wants_graph = any(w in lower for w in ["graph", "chart"])
         if wants_graph:
@@ -416,122 +535,4 @@ def handle(message):
             if dm: days = int(dm.group(1))
 
             wants_bar = "bar" in lower or "column" in lower
-            wants_pie = "pie" in lower or "share" in lower or "distribution" in lower
-            wants_line = "line" in lower or "trend" in lower
-            wants_all = any(w in lower for w in ["sabhi", "full", "teeno", "all", "sab"])
-
-            bot.send_message(message.chat.id, "⏳ Graph ban raha hai...")
-
-            if wants_all:
-                types_to_send = ["bar", "pie", "line"]
-            elif wants_bar and wants_pie:
-                types_to_send = ["bar", "pie"]
-            elif wants_bar and wants_line:
-                types_to_send = ["bar", "line"]
-            elif wants_pie and wants_line:
-                types_to_send = ["pie", "line"]
-            elif wants_pie:
-                types_to_send = ["pie"]
-            elif wants_line:
-                types_to_send = ["line"]
-            else:
-                types_to_send = ["bar"]
-
-            for t in types_to_send:
-                try:
-                    if t == "bar":
-                        url = build_bar_chart(days)
-                    elif t == "pie":
-                        url = build_pie_chart(days)
-                    else:
-                        url = build_line_chart(days)
-                    bot.send_photo(message.chat.id, url)
-                    time.sleep(1)
-                except Exception as ge:
-                    bot.send_message(message.chat.id, f"Graph error ({t}): {str(ge)}")
-            return
-
-        # -------- WEEKLY SUMMARY --------
-        if "weekly" in lower or "hafte ka summary" in lower or "hafte ki summary" in lower:
-            bot.reply_to(message, build_weekly_summary())
-            return
-
-        # -------- COMPARE --------
-        wants_compare = any(w in lower for w in ["compare", "farq", "antar", "difference", "vs"])
-        if wants_compare:
-            parts = re.split(r'\baur\b|\bor\b|\bya\b|\band\b|\bvs\b|\bse\b', lower)
-            anchors = []
-            for part in parts:
-                t = extract_time(part)
-                d = extract_date(part)
-                if t or d:
-                    anchors.append((d, t))
-
-            if len(anchors) >= 2:
-                a1, a2 = anchors[0], anchors[1]
-                d1 = a1[0] or (datetime.now().date() - timedelta(days=1))
-                d2 = a2[0] or datetime.now().date()
-                t1 = a1[1] or (12, 0)
-                t2 = a2[1] or (12, 0)
-
-                r1 = find_report_at(d1, t1[0], t1[1])
-                r2 = find_report_at(d2, t2[0], t2[1])
-
-                if not r1:
-                    bot.reply_to(message, f"{d1.strftime('%d %b')} {t1[0]:02d}:{t1[1]:02d} ke aas-paas koi MNP report nahi mili.")
-                    return
-                if not r2:
-                    bot.reply_to(message, f"{d2.strftime('%d %b')} {t2[0]:02d}:{t2[1]:02d} ke aas-paas koi MNP report nahi mili.")
-                    return
-
-                label_old = f"{d1.strftime('%d %b')} {t1[0]:02d}:{t1[1]:02d}"
-                label_new = f"{d2.strftime('%d %b')} {t2[0]:02d}:{t2[1]:02d}"
-                bot.reply_to(message, format_comparison(r1, r2, label_old, label_new))
-                return
-
-            # Fallback: last two MNP reports
-            db = get_db()
-            last_two = list(db.find({
-                "text": {"$regex": "FTA MNP|FTD"}
-            }).sort("timestamp", -1).limit(2))
-            if len(last_two) >= 2:
-                r1, r2 = last_two[1], last_two[0]
-                bot.reply_to(message, format_comparison(r1, r2))
-                return
-            else:
-                bot.reply_to(message, "Database mein kam se kam 2 MNP reports chahiye.")
-                return
-
-        # -------- NORMAL AI --------
-        response = client.chat.completions.create(
-            messages=[
-                {"role": "system", "content": "You are a helpful Telegram assistant. Reply in same language. Answer in 1-3 lines."},
-                {"role": "user", "content": clean_text}
-            ],
-            model="openai/gpt-oss-20b",
-        )
-        bot.reply_to(message, response.choices[0].message.content)
-
-    except Exception as e:
-        try:
-            bot.reply_to(message, "Error: " + str(e))
-        except:
-            pass
-
-# ================= WEBHOOK =================
-@app.route('/', methods=['POST'])
-def webhook():
-    try:
-        update = telebot.types.Update.de_json(request.stream.read().decode('utf-8'))
-        bot.process_new_updates([update])
-    except Exception as e:
-        print("WEBHOOK ERROR:", str(e))
-    return "OK", 200
-
-@app.route('/', methods=['GET'])
-def index():
-    return "Bot is running!", 200
-
-@app.route('/test', methods=['GET'])
-def test():
-    return "Token: " + ("SET" if BOT_TOKEN else "MISSING") + ", Groq: " + ("SET" if GROQ_KEY else "MISSING") + ", DB: " + ("SET" if MONGO_URL else "MISSING")
+            wants_pie = "pie" in lower or "share" in low
