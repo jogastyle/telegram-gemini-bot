@@ -185,9 +185,8 @@ def build_bar_chart(days=7):
                 "datalabels": {
                     "display": True,
                     "color": "white",
-                    "anchor": "end",
-                    "align": "end",
-                    "offset": 4,
+                    "anchor": "center",
+                    "align": "center",
                     "font": {"size": 11, "weight": "bold"},
                     "formatter": "function(value) { return value > 0 ? value : ''; }"
                 }
@@ -226,25 +225,58 @@ def build_line_chart(days=7):
         "data": {
             "labels": data["labels"],
             "datasets": [
-                {"label": "Uday Comm Agr", "data": data["uday"], "borderColor": "#2196F3", "fill": False, "tension": 0.3},
-                {"label": "Maa Vaishno Telecom", "data": data["mv"], "borderColor": "#F44336", "fill": False, "tension": 0.3},
-                {"label": "Total", "data": data["total"], "borderColor": "#4CAF50", "fill": False, "tension": 0.3, "borderWidth": 3},
+                {
+                    "label": "Uday Comm Agr",
+                    "data": data["uday"],
+                    "borderColor": "#2196F3",
+                    "fill": False,
+                    "tension": 0.3,
+                    "datalabels": {
+                        "align": "top",
+                        "anchor": "end",
+                        "offset": 6,
+                        "color": "#1565C0",
+                        "font": {"size": 10, "weight": "bold"},
+                        "formatter": "function(value) { return value > 0 ? value : ''; }"
+                    }
+                },
+                {
+                    "label": "Maa Vaishno Telecom",
+                    "data": data["mv"],
+                    "borderColor": "#F44336",
+                    "fill": False,
+                    "tension": 0.3,
+                    "datalabels": {
+                        "align": "bottom",
+                        "anchor": "end",
+                        "offset": 6,
+                        "color": "#B71C1C",
+                        "font": {"size": 10, "weight": "bold"},
+                        "formatter": "function(value) { return value > 0 ? value : ''; }"
+                    }
+                },
+                {
+                    "label": "Total",
+                    "data": data["total"],
+                    "borderColor": "#4CAF50",
+                    "fill": False,
+                    "tension": 0.3,
+                    "borderWidth": 3,
+                    "datalabels": {
+                        "align": "top",
+                        "anchor": "end",
+                        "offset": 20,
+                        "color": "#1B5E20",
+                        "font": {"size": 11, "weight": "bold"},
+                        "formatter": "function(value) { return value > 0 ? value : ''; }"
+                    }
+                },
             ]
         },
         "options": {
             "title": {"display": True, "text": f"MNP Trend - Last {days} Days", "fontSize": 16},
             "legend": {"position": "bottom"},
-            "plugins": {
-                "datalabels": {
-                    "display": True,
-                    "color": "black",
-                    "anchor": "end",
-                    "align": "top",
-                    "offset": 2,
-                    "font": {"size": 10, "weight": "bold"},
-                    "formatter": "function(value) { return value > 0 ? value : ''; }"
-                }
-            }
+            "layout": {"padding": {"top": 30}}
         }
     }
     return quickchart_url(config)
