@@ -50,6 +50,14 @@ def update_setting(key, value):
     db = get_db()
     db.update_one({"_id": "settings"}, {"$set": {key: value}}, upsert=True)
 
+def get_working_hours():
+    s = get_settings()
+    return s.get("wh_start", 7.0), s.get("wh_end", 19.0)
+
+def set_working_hours(start, end):
+    db = get_db()
+    db.update_one({"_id": "settings"}, {"$set": {"wh_start": start, "wh_end": end}}, upsert=True)
+
 app = Flask(__name__)
 
 DIST_PATTERN = re.compile(
@@ -161,7 +169,7 @@ def get_daily_data(days=7):
         dist_totals_week["Uday Comm Agr"] = dist_totals_week.get("Uday Comm Agr", 0) + uday
         dist_totals_week["Maa Vaishno Telecom"] = dist_totals_week.get("Maa Vaishno Telecom", 0) + mv
     return {"labels": days_list, "uday": uday_vals, "mv": mv_vals, "total": total_vals, "dist_totals": dist_totals_week}
-
+    
 def quickchart_url(config, width=800, height=400):
     encoded = urllib.parse.quote(json.dumps(config))
     return f"https://quickchart.io/chart?c={encoded}&w={width}&h={height}&bkg=white&plugins=chartjs-plugin-datalabels"
@@ -217,7 +225,7 @@ def build_pie_chart(days=7):
         }
     }
     return quickchart_url(config)
-    
+
 def build_line_chart(days=7):
     data = get_daily_data(days)
     config = {
@@ -369,9 +377,8 @@ def find_report_at(target_date, hour, minute):
     except Exception as e:
         print("FIND ERROR:", str(e))
         return None
-
+        
 def send_performance_alert(target_hour=None, target_minute=None):
-    """Manual performance check with optional time. Target comparison ke saath."""
     settings = get_settings()
     target_uday = settings.get("target_uday", 0)
     target_mv = settings.get("target_mv", 0)
@@ -445,6 +452,145 @@ def send_performance_alert(target_hour=None, target_minute=None):
         msg += f"• Uday Comm Agr: {uday_now}/{target_uday}\n• Maa Vaishno Telecom: {mv_now}/{target_mv}"
         return msg
 
+def get_historical_daily_avg(days=30, exclude_today=True):
+    now = datetime.now()
+    end_date = now.date() - timedelta(days=1) if exclude_today else now.date()
+    start_date = end_date - timedelta(days=days-1)
+    utc_start = datetime.combine(start_date, datetime.min.time()).timestamp() - IST_OFFSET
+    utc_end = datetime.combine(end_date, datetime.max.time()).timestamp() - IST_OFFSET
+    db = get_db()
+    reports = list(db.find({
+        "timestamp": {"$gte": utc_start, "$lte": utc_end},
+        "text": {"$regex": "FTA MNP|FTD"}
+    }).sort("timestamp", 1))
+    daily = {}
+    for r in reports:
+        key = time.strftime("%Y-%m-%d", time.gmtime(r["timestamp"] + IST_OFFSET))
+        daily[key] = r
+    totals = []
+    for k, r in daily.items():
+        p = r.get("parsed") or parse_report(r.get("text", ""))
+        if p:
+            totals.append((p.get("total") or {}).get("total", 0))
+    if not totals:
+        return 0
+    return sum(totals) / len(totals)
+
+def send_projection(period="day"):
+    wh_start, wh_end = get_working_hours()
+    now = datetime.now()
+    today = now.date()
+    db = get_db()
+
+    if period == "day":
+        utc_today = datetime.combine(today, datetime.min.time()).timestamp() - IST_OFFSET
+        today_reports = list(db.find({
+            "timestamp": {"$gte": utc_today},
+            "text": {"$regex": "FTA MNP|FTD"}
+        }).sort("timestamp", 1))
+        if not today_reports:
+            return "⚠️ Aaj koi report nahi aayi. Projection ke liye data chahiye."
+        first_ts = today_reports[0]["timestamp"]
+        last_ts = today_reports[-1]["timestamp"]
+        first_ist = datetime.fromtimestamp(first_ts + IST_OFFSET)
+        last_ist = datetime.fromtimestamp(last_ts + IST_OFFSET)
+        p_last = today_reports[-1].get("parsed") or parse_report(today_reports[-1].get("text", ""))
+        uday_today = p_last["distributors"].get("Uday Comm Agr", {}).get("total", 0)
+        mv_today = p_last["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
+        total_today = (p_last.get("total") or {}).get("total", 0)
+        current_hour = last_ist.hour + last_ist.minute / 60
+        actual_start = first_ist.hour + first_ist.minute / 60
+        eff_start = max(actual_start, wh_start)
+        elapsed = max(0.5, current_hour - eff_start)
+        remaining = max(0, wh_end - current_hour)
+        if remaining <= 0:
+            msg = f"📈 Aaj ka final (working hours khatam)\n\n"
+            msg += f"• Uday: {uday_today}\n• Maa Vaishno: {mv_today}\n• Total: {total_today}"
+            return msg
+        rate_uday = uday_today / elapsed
+        rate_mv = mv_today / elapsed
+        rate_total = total_today / elapsed
+        proj_uday = int(rate_uday * (elapsed + remaining))
+        proj_mv = int(rate_mv * (elapsed + remaining))
+        proj_total = int(rate_total * (elapsed + remaining))
+        msg = f"📈 Aaj ki Projection\n\n"
+        msg += f"Abhi tak ({last_ist.strftime('%H:%M')}):\n"
+        msg += f"• Uday: {uday_today}\n• Maa Vaishno: {mv_today}\n• Total: {total_today}\n\n"
+        msg += f"Expected ({int(wh_end)}:00 tak):\n"
+        msg += f"• Uday: ~{proj_uday}\n"
+        msg += f"• Maa Vaishno: ~{proj_mv}\n"
+        msg += f"• Total: ~{proj_total}"
+        return msg
+
+    elif period == "week":
+        days_since_monday = today.weekday()
+        monday = today - timedelta(days=days_since_monday)
+        utc_monday = datetime.combine(monday, datetime.min.time()).timestamp() - IST_OFFSET
+        week_reports = list(db.find({
+            "timestamp": {"$gte": utc_monday},
+            "text": {"$regex": "FTA MNP|FTD"}
+        }).sort("timestamp", 1))
+        daily = {}
+        for r in week_reports:
+            key = time.strftime("%Y-%m-%d", time.gmtime(r["timestamp"] + IST_OFFSET))
+            daily[key] = r
+        week_total = 0
+        days_done = 0
+        for k, r in daily.items():
+            p = r.get("parsed") or parse_report(r.get("text", ""))
+            if p:
+                week_total += (p.get("total") or {}).get("total", 0)
+                days_done += 1
+        remaining_days = 7 - today.weekday() - 1
+        avg_daily = get_historical_daily_avg(30)
+        proj = week_total + (avg_daily * remaining_days)
+        msg = f"📊 Weekly Projection\n\n"
+        msg += f"Is hafte abhi tak: {week_total} ({days_done} din)\n"
+        msg += f"Historical avg: {int(avg_daily)}/din\n"
+        msg += f"Bache hue {remaining_days} din: ~{int(avg_daily * remaining_days)}\n\n"
+        msg += f"Expected week total: ~{int(proj)}"
+        return msg
+
+    elif period == "month":
+        month_start = today.replace(day=1)
+        utc_month = datetime.combine(month_start, datetime.min.time()).timestamp() - IST_OFFSET
+        month_reports = list(db.find({
+            "timestamp": {"$gte": utc_month},
+            "text": {"$regex": "FTA MNP|FTD"}
+        }).sort("timestamp", 1))
+        monthly = {}
+        for r in month_reports:
+            key = time.strftime("%Y-%m-%d", time.gmtime(r["timestamp"] + IST_OFFSET))
+            monthly[key] = r
+        month_total = 0
+        days_done = 0
+        for k, r in monthly.items():
+            p = r.get("parsed") or parse_report(r.get("text", ""))
+            if p:
+                month_total += (p.get("total") or {}).get("total", 0)
+                days_done += 1
+        if today.month == 12:
+            next_month = today.replace(year=today.year+1, month=1, day=1)
+        else:
+            next_month = today.replace(month=today.month+1, day=1)
+        days_in_month = (next_month - month_start).days
+        remaining_days = days_in_month - today.day
+        avg_daily = get_historical_daily_avg(30)
+        if days_done > 0:
+            avg_this_month = month_total / days_done
+        else:
+            avg_this_month = 0
+        best_avg = max(avg_daily, avg_this_month) if days_done > 0 else avg_daily
+        proj = month_total + (best_avg * remaining_days)
+        msg = f"📅 Monthly Projection ({month_start.strftime('%b %Y')})\n\n"
+        msg += f"Abhi tak: {month_total} ({days_done} din)\n"
+        msg += f"Daily avg: {int(avg_this_month)}/din\n"
+        msg += f"Bache hue {remaining_days} din: ~{int(best_avg * remaining_days)}\n\n"
+        msg += f"Expected month total: ~{int(proj)}"
+        return msg
+
+    return "❌ Period samjha nahi."
+
 @app.route('/check-performance', methods=['GET'])
 def check_performance():
     try:
@@ -514,6 +660,19 @@ def handle(message):
         clean_text = text.replace(BOT_USERNAME, "").strip() or "Hi"
         lower = clean_text.lower()
 
+        whm = re.search(r'working\s*hours?\s*(\d{1,2})(?::(\d{2}))?\s*(?:se|to|-)\s*(\d{1,2})(?::(\d{2}))?', lower)
+        if whm and (is_tagged or is_private):
+            start = int(whm.group(1)) + (int(whm.group(2))/60 if whm.group(2) else 0)
+            end = int(whm.group(3)) + (int(whm.group(4))/60 if whm.group(4) else 0)
+            set_working_hours(start, end)
+            bot.reply_to(message, f"✅ Working hours set: {int(start)}:00 se {int(end)}:00\n\nProjection isi hisaab se calculate hoga.")
+            return
+
+        if ("working hours" in lower or "working hrs" in lower or "kaam ka time" in lower) and any(w in lower for w in ["status", "kitna", "check", "dikhao"]):
+            ws, we = get_working_hours()
+            bot.reply_to(message, f"⏰ Current working hours: {int(ws)}:00 se {int(we)}:00")
+            return
+
         tm = re.search(r'(uday|maa\s*vaishno|mv|vaishno)\s*(?:target|tgt)\s*(\d+)', lower)
         if tm:
             dist_key = tm.group(1); val = int(tm.group(2))
@@ -534,10 +693,20 @@ def handle(message):
 
         if ("target" in lower or "tgt" in lower) and any(w in lower for w in ["status", "kitna", "check", "dikhao"]):
             s = get_settings()
-            bot.reply_to(message, f"🎯 Current Targets:\n• Uday Comm Agr: {s.get('target_uday', 0)}\n• Maa Vaishno Telecom: {s.get('target_mv', 0)}")
+            ws, we = get_working_hours()
+            bot.reply_to(message, f"🎯 Current Targets:\n• Uday Comm Agr: {s.get('target_uday', 0)}\n• Maa Vaishno Telecom: {s.get('target_mv', 0)}\n\n⏰ Working hours: {int(ws)}:00 se {int(we)}:00")
             return
 
-        # -------- ACHIEVEMENT / PERFORMANCE (till time ach) --------
+        wants_proj = any(w in lower for w in ["projection", "prediction", "predict", "forecast", "estimate", "anuman"])
+        if wants_proj:
+            if any(w in lower for w in ["week", "hafte", "haftey", "hafte ka", "saaptah", "saaptahik"]):
+                bot.reply_to(message, send_projection("week"))
+            elif any(w in lower for w in ["month", "mahine", "mahina", "mahiney", "maasik"]):
+                bot.reply_to(message, send_projection("month"))
+            else:
+                bot.reply_to(message, send_projection("day"))
+            return
+
         wants_ach = any(w in lower for w in ["ach", "achievement", "achiv", "achiev"])
         if wants_ach:
             t = extract_time(lower)
@@ -547,11 +716,9 @@ def handle(message):
                 bot.reply_to(message, send_performance_alert())
             return
 
-        # -------- PERFORMANCE CHECK (manual) --------
         perf_triggers = ["performance", "perfomance", "alert"]
         has_perf = any(w in lower for w in perf_triggers)
         has_check_word = any(w in lower for w in ["check", "karo", "do", "batao", "dikhao", "dekho"])
-
         if has_perf and has_check_word:
             t = extract_time(lower)
             if t:
@@ -644,6 +811,10 @@ def handle(message):
                 bot.reply_to(message, "Database mein kam se kam 2 MNP reports chahiye.")
                 return
 
+        response = client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": "You are a helpful Telegram assistant. Reply in same language. Ans
+        
         response = client.chat.completions.create(
             messages=[
                 {"role": "system", "content": "You are a helpful Telegram assistant. Reply in same language. Answer in 1-3 lines."},
