@@ -42,10 +42,6 @@ def get_settings():
     s = db.find_one({"_id": "settings"})
     return s or {}
 
-def set_target(distributor, value):
-    db = get_db()
-    db.update_one({"_id": "settings"}, {"$set": {f"target_{distributor}": value}}, upsert=True)
-
 def update_setting(key, value):
     db = get_db()
     db.update_one({"_id": "settings"}, {"$set": {key: value}}, upsert=True)
@@ -58,7 +54,43 @@ def set_working_hours(start, end):
     db = get_db()
     db.update_one({"_id": "settings"}, {"$set": {"wh_start": start, "wh_end": end}}, upsert=True)
 
-# ============ STOCK ALERT HELPERS ============
+def set_target(distributor, value):
+    db = get_db()
+    db.update_one({"_id": "settings"}, {"$set": {f"target_{distributor}": value}}, upsert=True)
+
+# ============ ADMIN SYSTEM ============
+def is_admin(user_id, username):
+    s = get_settings()
+    owner_id = s.get("owner_id")
+    if owner_id and user_id == owner_id:
+        return True
+    admins = s.get("admins", [])
+    if username:
+        uname = "@" + username.lstrip("@").lower()
+        if uname in [a.lower() for a in admins]:
+            return True
+    return False
+
+def add_admin(username):
+    if not username.startswith("@"):
+        username = "@" + username
+    db = get_db()
+    s = get_settings()
+    admins = s.get("admins", [])
+    if username.lower() not in [a.lower() for a in admins]:
+        admins.append(username)
+    db.update_one({"_id": "settings"}, {"$set": {"admins": admins}}, upsert=True)
+
+def remove_admin(username):
+    if not username.startswith("@"):
+        username = "@" + username
+    db = get_db()
+    s = get_settings()
+    admins = s.get("admins", [])
+    admins = [a for a in admins if a.lower() != username.lower()]
+    db.update_one({"_id": "settings"}, {"$set": {"admins": admins}}, upsert=True)
+
+# ============ STOCK HELPERS ============
 MSISDN_MAP = {
     "9997389467": "Uday Comm Agr",
     "7895110381": "Maa Vaishno Telecom",
@@ -73,6 +105,90 @@ def set_tag(distributor_key, username):
     if username and not username.startswith("@"):
         username = "@" + username
     db.update_one({"_id": "settings"}, {"$set": {f"tag_{distributor_key}": username}}, upsert=True)
+
+# ============ PERMISSION SYSTEM ============
+DEFAULT_PERMS = {
+    "graphs": {"admin": True, "user": True},
+    "projections": {"admin": True, "user": True},
+    "performance": {"admin": True, "user": True},
+    "weekly_summary": {"admin": True, "user": False},
+    "compare": {"admin": True, "user": False},
+    "custom_report": {"admin": True, "user": True},
+    "menu": {"admin": True, "user": True},
+    "target_set": {"admin": True, "user": False},
+    "tag_set": {"admin": True, "user": False},
+    "working_hours": {"admin": True, "user": False},
+    "stock_threshold": {"admin": True, "user": False},
+    "stock_check": {"admin": True, "user": True},
+    "target_status": {"admin": True, "user": False},
+    "peak_hours": {"admin": True, "user": False},
+    "distributors": {"admin": True, "user": True},
+    "admin_mgmt": {"admin": True, "user": False},
+}
+
+PERM_ALIASES = {
+    "graph": "graphs", "graphs": "graphs", "chart": "graphs",
+    "projection": "projections", "proj": "projections", "projections": "projections",
+    "performance": "performance", "perf": "performance",
+    "weekly": "weekly_summary", "weekly_summary": "weekly_summary", "ws": "weekly_summary",
+    "compare": "compare", "cmp": "compare",
+    "custom": "custom_report", "custom_report": "custom_report", "cr": "custom_report",
+    "menu": "menu",
+    "target": "target_set", "tgt": "target_set", "target_set": "target_set",
+    "tag": "tag_set", "tag_set": "tag_set",
+    "working_hours": "working_hours", "wh": "working_hours", "hours": "working_hours",
+    "stock_threshold": "stock_threshold", "st": "stock_threshold",
+    "stock_check": "stock_check", "sc": "stock_check",
+    "target_status": "target_status", "ts": "target_status",
+    "peak_hours": "peak_hours", "peak": "peak_hours", "ph": "peak_hours",
+    "distributors": "distributors", "dist": "distributors",
+    "admin": "admin_mgmt", "admin_mgmt": "admin_mgmt",
+}
+
+def get_permissions():
+    s = get_settings()
+    p = s.get("permissions", {})
+    merged = {}
+    for k, v in DEFAULT_PERMS.items():
+        merged[k] = {
+            "admin": p.get(k, {}).get("admin", v["admin"]),
+            "user": p.get(k, {}).get("user", v["user"]),
+        }
+    return merged
+
+def check_permission(key, is_admin_flag):
+    perms = get_permissions()
+    if key not in perms:
+        return True
+    if is_admin_flag:
+        return perms[key]["admin"]
+    return perms[key]["user"]
+
+def set_permission(key, role, value):
+    db = get_db()
+    s = get_settings()
+    p = s.get("permissions", {})
+    if key not in p:
+        p[key] = {}
+    p[key][role] = value
+    db.update_one({"_id": "settings"}, {"$set": {"permissions": p}}, upsert=True)
+
+def reset_permissions():
+    db = get_db()
+    db.update_one({"_id": "settings"}, {"$unset": {"permissions": ""}}, upsert=True)
+
+def build_permission_dashboard():
+    perms = get_permissions()
+    lines = ["🔐 Permission Dashboard", ""]
+    lines.append(f"{'Command':<20} {'Admin':<8} {'User':<8}")
+    lines.append("─" * 38)
+    for k in DEFAULT_PERMS.keys():
+        a = "✅" if perms[k]["admin"] else "❌"
+        u = "✅" if perms[k]["user"] else "❌"
+        lines.append(f"{k:<20} {a:<8} {u:<8}")
+    lines.append("")
+    lines.append("Badalne ke liye: perm <name> <admin|user> <on|off>")
+    return "\n".join(lines)
 
 app = Flask(__name__)
 
@@ -95,19 +211,15 @@ def parse_report(text):
     for m in DIST_PATTERN.finditer(text):
         name = m.group(1).strip()
         distributors[name] = {
-            "jio": int(m.group(2)),
-            "vi": int(m.group(3)),
-            "other": int(m.group(4)),
-            "total": int(m.group(5)),
+            "jio": int(m.group(2)), "vi": int(m.group(3)),
+            "other": int(m.group(4)), "total": int(m.group(5)),
         }
     total = None
     tm = TOTAL_PATTERN.search(text)
     if tm:
         total = {
-            "jio": int(tm.group(1)),
-            "vi": int(tm.group(2)),
-            "other": int(tm.group(3)),
-            "total": int(tm.group(4)),
+            "jio": int(tm.group(1)), "vi": int(tm.group(2)),
+            "other": int(tm.group(3)), "total": int(tm.group(4)),
         }
     rtm = TIME_PATTERN.search(text)
     report_time = None
@@ -121,10 +233,8 @@ def parse_balance_report(text):
     items = []
     for m in BALANCE_PATTERN.finditer(text):
         items.append({
-            "msisdn": m.group(1),
-            "balance": int(m.group(2)),
-            "sale_lakh": int(m.group(3)),
-            "stock_days": float(m.group(4)),
+            "msisdn": m.group(1), "balance": int(m.group(2)),
+            "sale_lakh": int(m.group(3)), "stock_days": float(m.group(4)),
         })
     if not items:
         return None
@@ -137,10 +247,8 @@ def save_report(text, timestamp):
             return
         db = get_db()
         db.insert_one({
-            "text": text,
-            "timestamp": timestamp,
-            "date_str": ts_to_ist_str(timestamp),
-            "parsed": parsed,
+            "text": text, "timestamp": timestamp,
+            "date_str": ts_to_ist_str(timestamp), "parsed": parsed,
         })
     except Exception as e:
         print("DB SAVE ERROR:", str(e))
@@ -152,11 +260,9 @@ def save_balance_report(text, timestamp):
             return None
         db = get_db()
         db.insert_one({
-            "text": text,
-            "timestamp": timestamp,
+            "text": text, "timestamp": timestamp,
             "date_str": ts_to_ist_str(timestamp),
-            "type": "balance",
-            "parsed": parsed,
+            "type": "balance", "parsed": parsed,
         })
         return parsed
     except Exception as e:
@@ -241,13 +347,9 @@ def build_bar_chart(days=7):
         "options": {
             "title": {"display": True, "text": f"Daily MNP - Last {days} Days", "fontSize": 16},
             "legend": {"position": "bottom"},
-            "plugins": {
-                "datalabels": {
-                    "display": True, "color": "white", "anchor": "center", "align": "center",
-                    "font": {"size": 11, "weight": "bold"},
-                    "formatter": "function(value) { return value > 0 ? value : ''; }"
-                }
-            }
+            "plugins": {"datalabels": {"display": True, "color": "white", "anchor": "center", "align": "center",
+                "font": {"size": 11, "weight": "bold"},
+                "formatter": "function(value) { return value > 0 ? value : ''; }"}}
         }
     }
     return quickchart_url(config)
@@ -263,13 +365,8 @@ def build_pie_chart(days=7):
         "options": {
             "title": {"display": True, "text": f"Distributor Share - Last {days} Days", "fontSize": 16},
             "legend": {"position": "bottom"},
-            "plugins": {
-                "datalabels": {
-                    "display": True, "color": "white",
-                    "font": {"size": 12, "weight": "bold"},
-                    "formatter": "function(value, ctx) { var sum = ctx.dataset.data.reduce(function(a,b){return a+b;}, 0); var pct = Math.round(value / sum * 100); return value + '\\n(' + pct + '%)'; }"
-                }
-            }
+            "plugins": {"datalabels": {"display": True, "color": "white", "font": {"size": 12, "weight": "bold"},
+                "formatter": "function(value, ctx) { var sum = ctx.dataset.data.reduce(function(a,b){return a+b;}, 0); var pct = Math.round(value / sum * 100); return value + '\\n(' + pct + '%)'; }"}}
         }
     }
     return quickchart_url(config)
@@ -281,18 +378,12 @@ def build_line_chart(days=7):
         "data": {
             "labels": data["labels"],
             "datasets": [
-                {
-                    "label": "Uday Comm Agr", "data": data["uday"], "borderColor": "#2196F3", "fill": False, "tension": 0.3,
-                    "datalabels": {"display": True, "align": "top", "anchor": "end", "offset": 6, "color": "#1565C0", "font": {"size": 10, "weight": "bold"}, "formatter": "function(value) { return value > 0 ? value : ''; }"}
-                },
-                {
-                    "label": "Maa Vaishno Telecom", "data": data["mv"], "borderColor": "#F44336", "fill": False, "tension": 0.3,
-                    "datalabels": {"display": True, "align": "bottom", "anchor": "end", "offset": 6, "color": "#B71C1C", "font": {"size": 10, "weight": "bold"}, "formatter": "function(value) { return value > 0 ? value : ''; }"}
-                },
-                {
-                    "label": "Total", "data": data["total"], "borderColor": "#4CAF50", "fill": False, "tension": 0.3, "borderWidth": 3,
-                    "datalabels": {"display": True, "align": "top", "anchor": "end", "offset": 20, "color": "#1B5E20", "font": {"size": 11, "weight": "bold"}, "formatter": "function(value) { return value > 0 ? value : ''; }"}
-                },
+                {"label": "Uday Comm Agr", "data": data["uday"], "borderColor": "#2196F3", "fill": False, "tension": 0.3,
+                    "datalabels": {"display": True, "align": "top", "anchor": "end", "offset": 6, "color": "#1565C0", "font": {"size": 10, "weight": "bold"}, "formatter": "function(value) { return value > 0 ? value : ''; }"}},
+                {"label": "Maa Vaishno Telecom", "data": data["mv"], "borderColor": "#F44336", "fill": False, "tension": 0.3,
+                    "datalabels": {"display": True, "align": "bottom", "anchor": "end", "offset": 6, "color": "#B71C1C", "font": {"size": 10, "weight": "bold"}, "formatter": "function(value) { return value > 0 ? value : ''; }"}},
+                {"label": "Total", "data": data["total"], "borderColor": "#4CAF50", "fill": False, "tension": 0.3, "borderWidth": 3,
+                    "datalabels": {"display": True, "align": "top", "anchor": "end", "offset": 20, "color": "#1B5E20", "font": {"size": 11, "weight": "bold"}, "formatter": "function(value) { return value > 0 ? value : ''; }"}},
             ]
         },
         "options": {
@@ -466,16 +557,13 @@ def build_balance_alert(parsed_items, threshold=3):
     low_items = []
     for item in parsed_items.get("items", []):
         name = MSISDN_MAP.get(item["msisdn"])
-        if not name:
-            continue
+        if not name: continue
         if item["stock_days"] < threshold:
             dist_key = "uday" if "uday" in name.lower() else "mv"
             tag = get_tag(dist_key)
             tag_str = f" {tag}" if tag else ""
-            low_items.append({
-                "name": name, "tag_str": tag_str,
-                "days": item["stock_days"], "balance": item["balance"], "sale": item["sale_lakh"],
-            })
+            low_items.append({"name": name, "tag_str": tag_str, "days": item["stock_days"],
+                "balance": item["balance"], "sale": item["sale_lakh"]})
     if not low_items:
         return None
     lines = ["🚨 Low Balance Alert", ""]
@@ -525,8 +613,7 @@ def get_historical_daily_avg(days=30, exclude_today=True):
         p = r.get("parsed") or parse_report(r.get("text", ""))
         if p:
             totals.append((p.get("total") or {}).get("total", 0))
-    if not totals:
-        return 0
+    if not totals: return 0
     return sum(totals) / len(totals)
 
 def send_projection(period="day"):
@@ -537,8 +624,7 @@ def send_projection(period="day"):
     if period == "day":
         utc_today = datetime.combine(today, datetime.min.time()).timestamp() - IST_OFFSET
         today_reports = list(db.find({
-            "timestamp": {"$gte": utc_today},
-            "text": {"$regex": "FTA MNP|FTD"}
+            "timestamp": {"$gte": utc_today}, "text": {"$regex": "FTA MNP|FTD"}
         }).sort("timestamp", 1))
         if not today_reports:
             return "⚠️ Aaj koi report nahi aayi. Projection ke liye data chahiye."
@@ -571,8 +657,7 @@ def send_projection(period="day"):
         monday = today - timedelta(days=days_since_monday)
         utc_monday = datetime.combine(monday, datetime.min.time()).timestamp() - IST_OFFSET
         week_reports = list(db.find({
-            "timestamp": {"$gte": utc_monday},
-            "text": {"$regex": "FTA MNP|FTD"}
+            "timestamp": {"$gte": utc_monday}, "text": {"$regex": "FTA MNP|FTD"}
         }).sort("timestamp", 1))
         daily = {}
         for r in week_reports:
@@ -592,8 +677,7 @@ def send_projection(period="day"):
         month_start = today.replace(day=1)
         utc_month = datetime.combine(month_start, datetime.min.time()).timestamp() - IST_OFFSET
         month_reports = list(db.find({
-            "timestamp": {"$gte": utc_month},
-            "text": {"$regex": "FTA MNP|FTD"}
+            "timestamp": {"$gte": utc_month}, "text": {"$regex": "FTA MNP|FTD"}
         }).sort("timestamp", 1))
         monthly = {}
         for r in month_reports:
@@ -624,8 +708,7 @@ def send_peak_hours(days=7):
     utc_start = start.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() - IST_OFFSET
     db = get_db()
     reports = list(db.find({
-        "timestamp": {"$gte": utc_start},
-        "text": {"$regex": "FTA MNP|FTD"}
+        "timestamp": {"$gte": utc_start}, "text": {"$regex": "FTA MNP|FTD"}
     }).sort("timestamp", 1))
     if not reports:
         return "❌ Koi report nahi mili."
@@ -641,10 +724,11 @@ def send_peak_hours(days=7):
             p = r.get("parsed") or parse_report(r.get("text", ""))
             if not p: continue
             cur_total = (p.get("total") or {}).get("total", 0)
-            delta = cur_total - prev_total
-            if delta > 0:
-                ist_dt = datetime.fromtimestamp(r["timestamp"] + IST_OFFSET)
-                hourly[ist_dt.hour] = hourly.get(ist_dt.hour, 0) + delta
+            if prev_total > 0:
+                delta = cur_total - prev_total
+                if delta > 0:
+                    ist_dt = datetime.fromtimestamp(r["timestamp"] + IST_OFFSET)
+                    hourly[ist_dt.hour] = hourly.get(ist_dt.hour, 0) + delta
             prev_total = cur_total
     if not hourly:
         return "❌ Data parse nahi ho paaya."
@@ -655,8 +739,7 @@ def send_peak_hours(days=7):
     return "\n".join(lines)
 
 def send_distributor_comparison(days=7, only_today=False):
-    if only_today:
-        days = 1
+    if only_today: days = 1
     data = get_daily_data(days)
     uday_total = sum(data["uday"])
     mv_total = sum(data["mv"])
@@ -751,8 +834,7 @@ def send_target_achievement(period="month"):
     utc_start = datetime.combine(start_date, datetime.min.time()).timestamp() - IST_OFFSET
     db = get_db()
     reports = list(db.find({
-        "timestamp": {"$gte": utc_start},
-        "text": {"$regex": "FTA MNP|FTD"}
+        "timestamp": {"$gte": utc_start}, "text": {"$regex": "FTA MNP|FTD"}
     }).sort("timestamp", 1))
     daily = {}
     for r in reports:
@@ -862,7 +944,8 @@ def handle(message):
         if message.chat.id == int(GROUP_CHAT_ID) and "Distributor Balance Report" in text:
             parsed = save_balance_report(text, msg_ts)
             if parsed:
-                alert = build_balance_alert(parsed, 3)
+                th = get_settings().get("stock_threshold", 3)
+                alert = build_balance_alert(parsed, th)
                 if alert:
                     bot.send_message(GROUP_CHAT_ID, alert)
             return
@@ -878,8 +961,87 @@ def handle(message):
         clean_text = text.replace(BOT_USERNAME, "").strip() or "Hi"
         lower = clean_text.lower()
 
+        user_id = message.from_user.id
+        username = message.from_user.username
+        admin = is_admin(user_id, username)
+
+        # SET OWNER
+        if re.match(r'^(set\s+owner|main\s+owner)\s*me$', lower) and is_private:
+            s = get_settings()
+            if not s.get("owner_id"):
+                update_setting("owner_id", user_id)
+                bot.reply_to(message, "✅ Aap ab owner hain! Aapke paas full access hai.")
+            else:
+                bot.reply_to(message, "❌ Owner pehle se set hai.")
+            return
+
+        # ADMIN MGMT
+        adminm = re.search(r'admin\s+add\s+(@?[\w_]+)', lower)
+        if adminm and admin and (is_tagged or is_private):
+            add_admin(adminm.group(1))
+            bot.reply_to(message, f"✅ {adminm.group(1)} ab admin hai.")
+            return
+
+        adminr = re.search(r'admin\s+(?:remove|hatao|delete)\s+(@?[\w_]+)', lower)
+        if adminr and admin and (is_tagged or is_private):
+            remove_admin(adminr.group(1))
+            bot.reply_to(message, f"✅ {adminr.group(1)} admin se remove ho gaya.")
+            return
+
+        if "admin list" in lower or "admin dikhao" in lower:
+            s = get_settings()
+            owner_id = s.get("owner_id", "Not set")
+            admins = s.get("admins", [])
+            lines = [f"👑 Owner ID: {owner_id}", "", "🛡️ Admins:"]
+            if admins:
+                for a in admins: lines.append(f"• {a}")
+            else:
+                lines.append("(Koi admin nahi)")
+            bot.reply_to(message, "\n".join(lines))
+            return
+
+        if lower.strip() in ["who am i", "main kaun hu", "mera role"]:
+            role = "👑 Owner/Admin" if admin else "👤 Normal User"
+            bot.reply_to(message, f"{role}\n\nUsername: @{username or 'not set'}\nUser ID: {user_id}")
+            return
+
+        # PERMISSIONS
+        if lower.strip() in ["perm list", "permission status", "perm status", "permissions", "perm dashboard"]:
+            if not admin:
+                bot.reply_to(message, "❌ Sirf admins permission dekh sakte hain.")
+                return
+            bot.reply_to(message, build_permission_dashboard())
+            return
+
+        pm = re.search(r'perm\s+(\w+)\s+(admin|user|normal)\s+(on|off|yes|no|true|false)', lower)
+        if pm and admin and (is_tagged or is_private):
+            key_alias = pm.group(1).lower()
+            role = pm.group(2).lower()
+            if role == "normal": role = "user"
+            val_str = pm.group(3).lower()
+            value = val_str in ["on", "yes", "true"]
+            key = PERM_ALIASES.get(key_alias, key_alias)
+            if key not in DEFAULT_PERMS:
+                bot.reply_to(message, f"❌ '{key_alias}' permission nahi mila.\nValid: " + ", ".join(DEFAULT_PERMS.keys()))
+                return
+            set_permission(key, role, value)
+            emoji = "✅" if value else "❌"
+            bot.reply_to(message, f"{emoji} Permission updated:\n{key} → {role} = {'ON' if value else 'OFF'}")
+            return
+
+        if lower.strip() in ["perm reset", "permission reset"]:
+            if not admin:
+                bot.reply_to(message, "❌ Sirf admins reset kar sakte hain.")
+                return
+            reset_permissions()
+            bot.reply_to(message, "✅ Permissions reset to default.")
+            return
+
         # MENU with Inline Buttons
         if lower.strip() in ["/start", "/menu", "menu", "start", "help", "commands"]:
+            if not check_permission("menu", admin):
+                bot.reply_to(message, "❌ Menu currently disabled hai.")
+                return
             from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
             kb = InlineKeyboardMarkup(row_width=2)
             kb.add(
@@ -899,15 +1061,27 @@ def handle(message):
             bot.reply_to(message, "🤖 DTR Mainpuri Bot Menu\n\nKya dekhna chahte ho?", reply_markup=kb)
             return
 
-        # TAG SET
+        # TAG SET/REMOVE
         tagm = re.search(r'(uday|mv|maa\s*vaishno|vaishno)\s*tag\s*(@?[\w_]+)', lower)
         if tagm and (is_tagged or is_private):
-            dist_key_raw = tagm.group(1)
-            username = tagm.group(2)
-            dist_key = "uday" if "uday" in dist_key_raw else "mv"
-            set_tag(dist_key, username)
+            if not check_permission("tag_set", admin):
+                bot.reply_to(message, "❌ Ye command sirf admins use kar sakte hain.")
+                return
+            dist_key = "uday" if "uday" in tagm.group(1) else "mv"
+            set_tag(dist_key, tagm.group(2))
             display = "Uday Comm Agr" if dist_key == "uday" else "Maa Vaishno Telecom"
-            bot.reply_to(message, f"✅ {display} ke alerts mein ab {username} tag hoga.")
+            bot.reply_to(message, f"✅ {display} ke alerts mein ab {tagm.group(2)} tag hoga.")
+            return
+
+        tagr = re.search(r'(uday|mv|maa\s*vaishno|vaishno)\s*(?:tag\s*)?(?:remove|hatao|hata|delete|clear)', lower)
+        if tagr and (is_tagged or is_private):
+            if not check_permission("tag_set", admin):
+                bot.reply_to(message, "❌ Ye command sirf admins use kar sakte hain.")
+                return
+            dist_key = "uday" if "uday" in tagr.group(1) else "mv"
+            set_tag(dist_key, "")
+            display = "Uday Comm Agr" if dist_key == "uday" else "Maa Vaishno Telecom"
+            bot.reply_to(message, f"✅ {display} ka tag hata diya gaya.")
             return
 
         if ("tag" in lower) and any(w in lower for w in ["status", "dikhao", "check"]) and (is_tagged or is_private):
@@ -919,10 +1093,13 @@ def handle(message):
         # WORKING HOURS
         whm = re.search(r'working\s*hours?\s*(\d{1,2})(?::(\d{2}))?\s*(?:se|to|-)\s*(\d{1,2})(?::(\d{2}))?', lower)
         if whm and (is_tagged or is_private):
+            if not check_permission("working_hours", admin):
+                bot.reply_to(message, "❌ Ye command sirf admins use kar sakte hain.")
+                return
             start = int(whm.group(1)) + (int(whm.group(2))/60 if whm.group(2) else 0)
             end = int(whm.group(3)) + (int(whm.group(4))/60 if whm.group(4) else 0)
             set_working_hours(start, end)
-            bot.reply_to(message, f"✅ Working hours set: {int(start)}:00 se {int(end)}:00\n\nProjection isi hisaab se calculate hoga.")
+            bot.reply_to(message, f"✅ Working hours set: {int(start)}:00 se {int(end)}:00")
             return
 
         if ("working hours" in lower or "working hrs" in lower or "kaam ka time" in lower) and any(w in lower for w in ["status", "kitna", "check", "dikhao"]):
@@ -941,12 +1118,15 @@ def handle(message):
             else:
                 dist_key = None; val = None
         if dist_key and val is not None and (is_tagged or is_private):
+            if not check_permission("target_set", admin):
+                bot.reply_to(message, "❌ Ye command sirf admins use kar sakte hain.")
+                return
             if "uday" in dist_key:
                 set_target("uday", val)
-                bot.reply_to(message, f"✅ Uday Comm Agr target set: {val}\n\nRoz sham 7 baje check hoga.")
+                bot.reply_to(message, f"✅ Uday Comm Agr target set: {val}")
             else:
                 set_target("mv", val)
-                bot.reply_to(message, f"✅ Maa Vaishno Telecom target set: {val}\n\nRoz sham 7 baje check hoga.")
+                bot.reply_to(message, f"✅ Maa Vaishno Telecom target set: {val}")
             return
 
         if ("target" in lower or "tgt" in lower) and any(w in lower for w in ["status", "kitna", "check", "dikhao"]):
@@ -955,8 +1135,11 @@ def handle(message):
             bot.reply_to(message, f"🎯 Current Targets:\n• Uday Comm Agr: {s.get('target_uday', 0)}\n• Maa Vaishno Telecom: {s.get('target_mv', 0)}\n\n⏰ Working hours: {int(ws)}:00 se {int(we)}:00")
             return
 
-        # STOCK CHECK / THRESHOLD
+        # STOCK
         if any(w in lower for w in ["stock check", "stock alert", "balance check", "low stock", "stock status"]):
+            if not check_permission("stock_check", admin):
+                bot.reply_to(message, "❌ Ye feature currently disabled hai.")
+                return
             th = get_settings().get("stock_threshold", 3)
             tm2 = re.search(r'threshold\s*(\d+)', lower)
             if tm2: th = int(tm2.group(1))
@@ -965,194 +1148,260 @@ def handle(message):
 
         stm = re.search(r'stock\s*threshold\s*(\d+)', lower)
         if stm and (is_tagged or is_private):
+            if not check_permission("stock_threshold", admin):
+                bot.reply_to(message, "❌ Ye command sirf admins use kar sakte hain.")
+                return
             update_setting("stock_threshold", int(stm.group(1)))
             bot.reply_to(message, f"✅ Stock alert threshold set: {stm.group(1)} din")
             return
 
-        # PEAK HOURS
-        if any(w in lower for w in ["peak hour", "peak hours", "peak time", "kis time sabse zyada", "kab sabse zyada"]):
-            days = 7
-            dm = re.search(r'(\d{1,2})\s*(?:din|days)', lower)
-            if dm: days = int(dm.group(1))
-            bot.reply_to(message, send_peak_hours(days))
+        # ... (Part 6 mein continue)
+        
+    # PEAK HOURS
+    if any(w in lower for w in ["peak hour", "peak hours", "peak time", "kis time sabse zyada", "kab sabse zyada"]):
+        if not check_permission("peak_hours", admin):
+            bot.reply_to(message, "❌ Ye feature currently disabled hai.")
             return
+        days = 7
+        dm = re.search(r'(\d{1,2})\s*(?:din|days)', lower)
+        if dm: days = int(dm.group(1))
+        bot.reply_to(message, send_peak_hours(days))
+        return
 
-        # DISTRIBUTOR COMPARISON
-        if any(w in lower for w in ["distributor comparison", "dono distributor", "uday vs", "mv vs", "uday aur mv compare", "kaun better", "kaun aage"]):
-            if any(w in lower for w in ["aaj", "today", "abhi"]):
-                bot.reply_to(message, send_distributor_comparison(days=1, only_today=True))
+    # DISTRIBUTOR COMPARISON
+    if any(w in lower for w in ["distributor comparison", "dono distributor", "uday vs", "mv vs", "uday aur mv compare", "kaun better", "kaun aage"]):
+        if not check_permission("distributors", admin):
+            bot.reply_to(message, "❌ Ye feature currently disabled hai.")
+            return
+        if any(w in lower for w in ["aaj", "today", "abhi"]):
+            bot.reply_to(message, send_distributor_comparison(days=1, only_today=True))
+            return
+        days = 7
+        dm = re.search(r'(\d{1,2})\s*(?:din|days)', lower)
+        if dm: days = int(dm.group(1))
+        bot.reply_to(message, send_distributor_comparison(days))
+        return
+
+    # GROWTH
+    if any(w in lower for w in ["growth", "growth rate", "kitne percent badha", "kitna badha", "vikas"]):
+        if not check_permission("performance", admin):
+            bot.reply_to(message, "❌ Ye feature currently disabled hai.")
+            return
+        if any(w in lower for w in ["month", "mahine", "mahina"]):
+            bot.reply_to(message, send_growth_rate("month"))
+        else:
+            bot.reply_to(message, send_growth_rate("week"))
+        return
+
+    # TARGET ACHIEVEMENT
+    if any(w in lower for w in ["target achievement", "target rate", "kitne din target pura", "achievement rate"]):
+        if not check_permission("performance", admin):
+            bot.reply_to(message, "❌ Ye feature currently disabled hai.")
+            return
+        if any(w in lower for w in ["month", "mahine", "mahina"]):
+            bot.reply_to(message, send_target_achievement("month"))
+        else:
+            bot.reply_to(message, send_target_achievement("week"))
+        return
+
+    # CUSTOM REPORT
+    cr = re.search(r'(uday|mv|maa\s*vaishno|vaishno)\s*(?:ka\s*)?report', lower)
+    if cr:
+        if not check_permission("custom_report", admin):
+            bot.reply_to(message, "❌ Ye feature currently disabled hai.")
+            return
+        days = 7
+        dm = re.search(r'(\d{1,2})\s*(?:din|days)', lower)
+        if dm: days = int(dm.group(1))
+        bot.reply_to(message, send_custom_report(cr.group(1), days))
+        return
+
+    # PROJECTION
+    wants_proj = any(w in lower for w in ["projection", "prediction", "predict", "forecast", "estimate", "anuman"])
+    if wants_proj:
+        if not check_permission("projections", admin):
+            bot.reply_to(message, "❌ Ye feature currently disabled hai.")
+            return
+        if any(w in lower for w in ["week", "hafte", "haftey", "hafte ka", "saaptah", "saaptahik"]):
+            bot.reply_to(message, send_projection("week"))
+        elif any(w in lower for w in ["month", "mahine", "mahina", "mahiney", "maasik"]):
+            bot.reply_to(message, send_projection("month"))
+        else:
+            bot.reply_to(message, send_projection("day"))
+        return
+
+    # ACHIEVEMENT
+    wants_ach = any(w in lower for w in ["ach", "achievement", "achiv", "achiev"])
+    if wants_ach:
+        if not check_permission("performance", admin):
+            bot.reply_to(message, "❌ Ye feature currently disabled hai.")
+            return
+        t = extract_time(lower)
+        if t:
+            bot.reply_to(message, send_performance_alert(t[0], t[1]))
+        else:
+            bot.reply_to(message, send_performance_alert())
+        return
+
+    # PERFORMANCE
+    perf_triggers = ["performance", "perfomance", "alert"]
+    has_perf = any(w in lower for w in perf_triggers)
+    has_check_word = any(w in lower for w in ["check", "karo", "do", "batao", "dikhao", "dekho"])
+    if has_perf and has_check_word:
+        if not check_permission("performance", admin):
+            bot.reply_to(message, "❌ Ye feature currently disabled hai.")
+            return
+        t = extract_time(lower)
+        if t:
+            bot.reply_to(message, send_performance_alert(t[0], t[1]))
+        else:
+            bot.reply_to(message, send_performance_alert())
+        return
+
+    if "till" in lower and any(w in lower for w in ["check", "performance", "perfomance", "alert"]):
+        if not check_permission("performance", admin):
+            bot.reply_to(message, "❌ Ye feature currently disabled hai.")
+            return
+        t = extract_time(lower)
+        if t:
+            bot.reply_to(message, send_performance_alert(t[0], t[1]))
+        else:
+            bot.reply_to(message, send_performance_alert())
+        return
+
+    # GRAPHS
+    wants_graph = any(w in lower for w in ["graph", "chart"])
+    if wants_graph:
+        if not check_permission("graphs", admin):
+            bot.reply_to(message, "❌ Ye feature currently disabled hai.")
+            return
+        days = 7
+        dm = re.search(r'(\d{1,2})\s*(?:din|days)', lower)
+        if dm: days = int(dm.group(1))
+        wants_bar = "bar" in lower or "column" in lower
+        wants_pie = "pie" in lower or "share" in lower or "distribution" in lower
+        wants_line = "line" in lower or "trend" in lower
+        wants_all = any(w in lower for w in ["sabhi", "full", "teeno", "all", "sab", "sare"])
+        bot.send_message(message.chat.id, "⏳ Graph ban raha hai...")
+        if wants_all:
+            types_to_send = ["bar", "pie", "line"]
+        elif wants_bar and wants_pie:
+            types_to_send = ["bar", "pie"]
+        elif wants_bar and wants_line:
+            types_to_send = ["bar", "line"]
+        elif wants_pie and wants_line:
+            types_to_send = ["pie", "line"]
+        elif wants_pie:
+            types_to_send = ["pie"]
+        elif wants_line:
+            types_to_send = ["line"]
+        else:
+            types_to_send = ["bar"]
+        for t in types_to_send:
+            try:
+                if t == "bar": url = build_bar_chart(days)
+                elif t == "pie": url = build_pie_chart(days)
+                else: url = build_line_chart(days)
+                bot.send_photo(message.chat.id, url)
+                time.sleep(1)
+            except Exception as ge:
+                bot.send_message(message.chat.id, f"Graph error ({t}): {str(ge)}")
+        return
+
+    # WEEKLY SUMMARY
+    if "weekly" in lower or "hafte ka summary" in lower or "hafte ki summary" in lower:
+        if not check_permission("weekly_summary", admin):
+            bot.reply_to(message, "❌ Ye feature currently disabled hai.")
+            return
+        bot.reply_to(message, build_weekly_summary())
+        return
+
+    # COMPARE
+    wants_compare = any(w in lower for w in ["compare", "farq", "antar", "difference"])
+    if wants_compare:
+        if not check_permission("compare", admin):
+            bot.reply_to(message, "❌ Ye feature currently disabled hai.")
+            return
+        parts = re.split(r'\baur\b|\bor\b|\bya\b|\band\b|\bvs\b|\bse\b', lower)
+        anchors = []
+        for part in parts:
+            t = extract_time(part)
+            d = extract_date(part)
+            if t or d:
+                anchors.append((d, t))
+        if len(anchors) >= 2:
+            a1, a2 = anchors[0], anchors[1]
+            d1 = a1[0] or (datetime.now().date() - timedelta(days=1))
+            d2 = a2[0] or datetime.now().date()
+            t1 = a1[1] or (12, 0)
+            t2 = a2[1] or (12, 0)
+            r1 = find_report_at(d1, t1[0], t1[1])
+            r2 = find_report_at(d2, t2[0], t2[1])
+            if not r1:
+                bot.reply_to(message, f"{d1.strftime('%d %b')} {t1[0]:02d}:{t1[1]:02d} ke aas-paas koi MNP report nahi mili.")
                 return
-            days = 7
-            dm = re.search(r'(\d{1,2})\s*(?:din|days)', lower)
-            if dm: days = int(dm.group(1))
-            bot.reply_to(message, send_distributor_comparison(days))
-            return
-
-        # GROWTH
-        if any(w in lower for w in ["growth", "growth rate", "kitne percent badha", "kitna badha", "vikas"]):
-            if any(w in lower for w in ["month", "mahine", "mahina"]):
-                bot.reply_to(message, send_growth_rate("month"))
-            else:
-                bot.reply_to(message, send_growth_rate("week"))
-            return
-
-        # TARGET ACHIEVEMENT
-        if any(w in lower for w in ["target achievement", "target rate", "kitne din target pura", "achievement rate"]):
-            if any(w in lower for w in ["month", "mahine", "mahina"]):
-                bot.reply_to(message, send_target_achievement("month"))
-            else:
-                bot.reply_to(message, send_target_achievement("week"))
-            return
-
-        # CUSTOM REPORT
-        cr = re.search(r'(uday|mv|maa\s*vaishno|vaishno)\s*(?:ka\s*)?report', lower)
-        if cr:
-            days = 7
-            dm = re.search(r'(\d{1,2})\s*(?:din|days)', lower)
-            if dm: days = int(dm.group(1))
-            bot.reply_to(message, send_custom_report(cr.group(1), days))
-            return
-
-        # PROJECTION
-        wants_proj = any(w in lower for w in ["projection", "prediction", "predict", "forecast", "estimate", "anuman"])
-        if wants_proj:
-            if any(w in lower for w in ["week", "hafte", "haftey", "hafte ka", "saaptah", "saaptahik"]):
-                bot.reply_to(message, send_projection("week"))
-            elif any(w in lower for w in ["month", "mahine", "mahina", "mahiney", "maasik"]):
-                bot.reply_to(message, send_projection("month"))
-            else:
-                bot.reply_to(message, send_projection("day"))
-            return
-
-        # ACHIEVEMENT
-        wants_ach = any(w in lower for w in ["ach", "achievement", "achiv", "achiev"])
-        if wants_ach:
-            t = extract_time(lower)
-            if t:
-                bot.reply_to(message, send_performance_alert(t[0], t[1]))
-            else:
-                bot.reply_to(message, send_performance_alert())
-            return
-
-        # PERFORMANCE CHECK
-        perf_triggers = ["performance", "perfomance", "alert"]
-        has_perf = any(w in lower for w in perf_triggers)
-        has_check_word = any(w in lower for w in ["check", "karo", "do", "batao", "dikhao", "dekho"])
-        if has_perf and has_check_word:
-            t = extract_time(lower)
-            if t:
-                bot.reply_to(message, send_performance_alert(t[0], t[1]))
-            else:
-                bot.reply_to(message, send_performance_alert())
-            return
-
-        if "till" in lower and any(w in lower for w in ["check", "performance", "perfomance", "alert"]):
-            t = extract_time(lower)
-            if t:
-                bot.reply_to(message, send_performance_alert(t[0], t[1]))
-            else:
-                bot.reply_to(message, send_performance_alert())
-            return
-
-        # GRAPHS
-        wants_graph = any(w in lower for w in ["graph", "chart"])
-        if wants_graph:
-            days = 7
-            dm = re.search(r'(\d{1,2})\s*(?:din|days)', lower)
-            if dm: days = int(dm.group(1))
-            wants_bar = "bar" in lower or "column" in lower
-            wants_pie = "pie" in lower or "share" in lower or "distribution" in lower
-            wants_line = "line" in lower or "trend" in lower
-            wants_all = any(w in lower for w in ["sabhi", "full", "teeno", "all", "sab", "sare"])
-            bot.send_message(message.chat.id, "⏳ Graph ban raha hai...")
-            if wants_all:
-                types_to_send = ["bar", "pie", "line"]
-            elif wants_bar and wants_pie:
-                types_to_send = ["bar", "pie"]
-            elif wants_bar and wants_line:
-                types_to_send = ["bar", "line"]
-            elif wants_pie and wants_line:
-                types_to_send = ["pie", "line"]
-            elif wants_pie:
-                types_to_send = ["pie"]
-            elif wants_line:
-                types_to_send = ["line"]
-            else:
-                types_to_send = ["bar"]
-            for t in types_to_send:
-                try:
-                    if t == "bar": url = build_bar_chart(days)
-                    elif t == "pie": url = build_pie_chart(days)
-                    else: url = build_line_chart(days)
-                    bot.send_photo(message.chat.id, url)
-                    time.sleep(1)
-                except Exception as ge:
-                    bot.send_message(message.chat.id, f"Graph error ({t}): {str(ge)}")
-            return
-
-        if "weekly" in lower or "hafte ka summary" in lower or "hafte ki summary" in lower:
-            bot.reply_to(message, build_weekly_summary())
-            return
-
-        # COMPARE
-        wants_compare = any(w in lower for w in ["compare", "farq", "antar", "difference"])
-        if wants_compare:
-            parts = re.split(r'\baur\b|\bor\b|\bya\b|\band\b|\bvs\b|\bse\b', lower)
-            anchors = []
-            for part in parts:
-                t = extract_time(part)
-                d = extract_date(part)
-                if t or d:
-                    anchors.append((d, t))
-            if len(anchors) >= 2:
-                a1, a2 = anchors[0], anchors[1]
-                d1 = a1[0] or (datetime.now().date() - timedelta(days=1))
-                d2 = a2[0] or datetime.now().date()
-                t1 = a1[1] or (12, 0)
-                t2 = a2[1] or (12, 0)
-                r1 = find_report_at(d1, t1[0], t1[1])
-                r2 = find_report_at(d2, t2[0], t2[1])
-                if not r1:
-                    bot.reply_to(message, f"{d1.strftime('%d %b')} {t1[0]:02d}:{t1[1]:02d} ke aas-paas koi MNP report nahi mili.")
-                    return
-                if not r2:
-                    bot.reply_to(message, f"{d2.strftime('%d %b')} {t2[0]:02d}:{t2[1]:02d} ke aas-paas koi MNP report nahi mili.")
-                    return
-                label_old = f"{d1.strftime('%d %b')} {t1[0]:02d}:{t1[1]:02d}"
-                label_new = f"{d2.strftime('%d %b')} {t2[0]:02d}:{t2[1]:02d}"
-                bot.reply_to(message, format_comparison(r1, r2, label_old, label_new))
+            if not r2:
+                bot.reply_to(message, f"{d2.strftime('%d %b')} {t2[0]:02d}:{t2[1]:02d} ke aas-paas koi MNP report nahi mili.")
                 return
-            db = get_db()
-            last_two = list(db.find({"text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", -1).limit(2))
-            if len(last_two) >= 2:
-                r1, r2 = last_two[1], last_two[0]
-                bot.reply_to(message, format_comparison(r1, r2))
-                return
-            else:
-                bot.reply_to(message, "Database mein kam se kam 2 MNP reports chahiye.")
-                return
+            label_old = f"{d1.strftime('%d %b')} {t1[0]:02d}:{t1[1]:02d}"
+            label_new = f"{d2.strftime('%d %b')} {t2[0]:02d}:{t2[1]:02d}"
+            bot.reply_to(message, format_comparison(r1, r2, label_old, label_new))
+            return
+        db = get_db()
+        last_two = list(db.find({"text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", -1).limit(2))
+        if len(last_two) >= 2:
+            r1, r2 = last_two[1], last_two[0]
+            bot.reply_to(message, format_comparison(r1, r2))
+            return
+        else:
+            bot.reply_to(message, "Database mein kam se kam 2 MNP reports chahiye.")
+            return
 
-        # FALLBACK AI
-        response = client.chat.completions.create(
-            messages=[
-                {"role": "system", "content": "You are a helpful Telegram assistant. Reply in same language. Answer in 1-3 lines."},
-                {"role": "user", "content": clean_text}
-            ],
-            model="openai/gpt-oss-20b",
-        )
-        bot.reply_to(message, response.choices[0].message.content)
-    except Exception as e:
-        try:
-            bot.reply_to(message, "Error: " + str(e))
-        except:
-            pass
-            
+    # FALLBACK AI
+    response = client.chat.completions.create(
+        messages=[
+            {"role": "system", "content": "You are a helpful Telegram assistant. Reply in same language. Answer in 1-3 lines."},
+            {"role": "user", "content": clean_text}
+        ],
+        model="openai/gpt-oss-20b",
+    )
+    bot.reply_to(message, response.choices[0].message.content)
+except Exception as e:
+    try:
+        bot.reply_to(message, "Error: " + str(e))
+    except:
+        pass
+        
+BUTTON_PERM_MAP = {
+    "graph_bar": "graphs",
+    "graph_pie": "graphs",
+    "graph_line": "graphs",
+    "proj_day": "projections",
+    "proj_week": "projections",
+    "proj_month": "projections",
+    "perf_check": "performance",
+    "tgt_status": "target_status",
+    "stock_check": "stock_check",
+    "weekly_summary": "weekly_summary",
+    "peak_hours": "peak_hours",
+    "dist_compare": "distributors",
+}
+
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
     try:
         bot.answer_callback_query(call.id)
         cid = call.message.chat.id
         data = call.data
+        user_id = call.from_user.id
+        username = call.from_user.username
+        admin = is_admin(user_id, username)
+
+        perm_key = BUTTON_PERM_MAP.get(data)
+        if perm_key and not check_permission(perm_key, admin):
+            bot.send_message(cid, "❌ Ye feature currently disabled hai.")
+            return
+
         if data == "graph_bar":
             bot.send_photo(cid, build_bar_chart(7))
         elif data == "graph_pie":
