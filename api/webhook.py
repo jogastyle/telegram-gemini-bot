@@ -181,6 +181,17 @@ def build_bar_chart(days=7):
         "options": {
             "title": {"display": True, "text": f"Daily MNP - Last {days} Days", "fontSize": 16},
             "legend": {"position": "bottom"},
+            "plugins": {
+                "datalabels": {
+                    "display": True,
+                    "color": "white",
+                    "anchor": "end",
+                    "align": "end",
+                    "offset": 4,
+                    "font": {"size": 11, "weight": "bold"},
+                    "formatter": "function(value) { return value > 0 ? value : ''; }"
+                }
+            }
         }
     }
     return quickchart_url(config)
@@ -193,10 +204,21 @@ def build_pie_chart(days=7):
     config = {
         "type": "doughnut",
         "data": {"labels": labels, "datasets": [{"data": values, "backgroundColor": ["#2196F3", "#F44336", "#4CAF50", "#FFC107"]}]},
-        "options": {"title": {"display": True, "text": f"Distributor Share - Last {days} Days", "fontSize": 16}, "legend": {"position": "bottom"}}
+        "options": {
+            "title": {"display": True, "text": f"Distributor Share - Last {days} Days", "fontSize": 16},
+            "legend": {"position": "bottom"},
+            "plugins": {
+                "datalabels": {
+                    "display": True,
+                    "color": "white",
+                    "font": {"size": 12, "weight": "bold"},
+                    "formatter": "function(value, ctx) { var sum = ctx.dataset.data.reduce(function(a,b){return a+b;}, 0); var pct = Math.round(value / sum * 100); return value + '\\n(' + pct + '%)'; }"
+                }
+            }
+        }
     }
     return quickchart_url(config)
-
+    
 def build_line_chart(days=7):
     data = get_daily_data(days)
     config = {
@@ -209,7 +231,21 @@ def build_line_chart(days=7):
                 {"label": "Total", "data": data["total"], "borderColor": "#4CAF50", "fill": False, "tension": 0.3, "borderWidth": 3},
             ]
         },
-        "options": {"title": {"display": True, "text": f"MNP Trend - Last {days} Days", "fontSize": 16}, "legend": {"position": "bottom"}}
+        "options": {
+            "title": {"display": True, "text": f"MNP Trend - Last {days} Days", "fontSize": 16},
+            "legend": {"position": "bottom"},
+            "plugins": {
+                "datalabels": {
+                    "display": True,
+                    "color": "black",
+                    "anchor": "end",
+                    "align": "top",
+                    "offset": 2,
+                    "font": {"size": 10, "weight": "bold"},
+                    "formatter": "function(value) { return value > 0 ? value : ''; }"
+                }
+            }
+        }
     }
     return quickchart_url(config)
 
@@ -298,7 +334,7 @@ def find_report_at(target_date, hour, minute):
     except Exception as e:
         print("FIND ERROR:", str(e))
         return None
-        
+
 @app.route('/check-performance', methods=['GET'])
 def check_performance():
     try:
