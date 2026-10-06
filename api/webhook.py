@@ -19,6 +19,12 @@ client = Groq(api_key=GROQ_KEY)
 
 _db_client = None
 
+# IST offset: +5:30
+IST_OFFSET = 5 * 3600 + 30 * 60
+
+def ts_to_ist_str(ts):
+    return time.strftime("%Y-%m-%d %H:%M", time.gmtime(ts + IST_OFFSET))
+
 def get_db():
     global _db_client
     if _db_client is None:
@@ -69,12 +75,12 @@ def save_report(text, timestamp):
     try:
         parsed = parse_report(text)
         if not parsed:
-            return  # only save MNP reports
+            return
         db = get_db()
         db.insert_one({
             "text": text,
             "timestamp": timestamp,
-            "date_str": time.strftime("%Y-%m-%d %H:%M", time.localtime(timestamp)),
+            "date_str": ts_to_ist_str(timestamp),
             "parsed": parsed,
         })
     except Exception as e:
@@ -113,9 +119,10 @@ def format_comparison(r_old, r_new, label_old="Pehle", label_new="Ab"):
 def build_weekly_summary():
     now = datetime.now()
     week_ago = now - timedelta(days=7)
+    utc_start = week_ago.timestamp() - IST_OFFSET
     db = get_db()
     reports = list(db.find({
-        "timestamp": {"$gte": week_ago.timestamp()},
+        "timestamp": {"$gte": utc_start},
         "text": {"$regex": "FTA MNP|FTD"}
     }).sort("timestamp", 1))
     if not reports:
@@ -123,7 +130,7 @@ def build_weekly_summary():
 
     daily_last = {}
     for r in reports:
-        day_key = datetime.fromtimestamp(r["timestamp"]).strftime("%Y-%m-%d")
+        day_key = time.strftime("%Y-%m-%d", time.gmtime(r["timestamp"] + IST_OFFSET))
         daily_last[day_key] = r
 
     dist_totals = {}
@@ -190,29 +197,28 @@ def extract_time(text):
 def apply_ampm(text, idx, hour):
     """Convert 12-hour time to 24-hour based on Hindi keywords around it."""
     if hour >= 13:
-        return hour  # already 24h or invalid
+        return hour
     if hour == 12:
-        # 12 baje - depends on context
         context = text[max(0, idx - 20):idx + 30]
         if re.search(r'raat|night', context):
-            return 0  # 12 AM = 00:00
-        return 12  # 12 PM
+            return 0
+        return 12
 
     context = text[max(0, idx - 20):idx + 30]
-    # Morning keywords
+    # Morning
     if re.search(r'subah|subha|saver|savere|morning|\bam\b', context):
-        return hour  # 8 subah = 08:00
+        return hour
     # Afternoon
     if re.search(r'dophar|dopahar|dopaher|afternoon', context):
-        return hour + 12 if hour < 12 else hour  # 2 dophar = 14:00
+        return hour + 12 if hour < 12 else hour
     # Evening
     if re.search(r'shaam|sham|evening', context):
-        return hour + 12 if hour < 12 else hour  # 6 shaam = 18:00
+        return hour + 12 if hour < 12 else hour
     # Night
     if re.search(r'raat|night|\bpm\b', context):
-        return hour + 12 if hour < 12 else hour  # 8 raat = 20:00
+        return hour + 12 if hour < 12 else hour
 
-    # No keyword - assume 24h if hour > 12, else treat as-is
+    # No keyword - treat as-is
     return hour
 
 def extract_date(text):
@@ -249,20 +255,30 @@ def extract_date(text):
     return None
 
 def find_report_at(target_date, hour, minute):
-    """Sirf MNP reports mein se closest match dhundo."""
+    """Sirf MNP reports mein se closest match dhundo, IST timezone ke saath."""
     try:
-        start = datetime.combine(target_date, datetime.min.time()).timestamp()
-        end = start + 86400
+        # IST date+time → UTC
+        ist_ts = datetime.combine(
+            target_date,
+            datetime.min.time().replace(hour=hour, minute=minute)
+        ).timestamp()
+        utc_target = ist_ts - IST_OFFSET
+
+        # Us din ki IST range (00:00 - 24:00) → UTC
+        ist_start = datetime.combine(target_date, datetime.min.time()).timestamp()
+        ist_end = ist_start + 86400
+        utc_start = ist_start - IST_OFFSET
+        utc_end = ist_end - IST_OFFSET
+
         db = get_db()
-        # Only MNP reports
         reports = list(db.find({
-            "timestamp": {"$gte": start, "$lt": end},
+            "timestamp": {"$gte": utc_start, "$lt": utc_end},
             "text": {"$regex": "FTA MNP|FTD"}
         }).sort("timestamp", 1))
         if not reports:
             return None
-        target_ts = datetime.combine(target_date, datetime.min.time().replace(hour=hour, minute=minute)).timestamp()
-        return min(reports, key=lambda r: abs(r["timestamp"] - target_ts))
+
+        return min(reports, key=lambda r: abs(r["timestamp"] - utc_target))
     except Exception as e:
         print("FIND ERROR:", str(e))
         return None
@@ -341,7 +357,8 @@ def handle(message):
         # Compare
         wants_compare = any(w in lower for w in ["compare", "farq", "antar", "difference", "vs"])
         if wants_compare:
-            parts = re.split(r'\baur\b|\band\b|\bvs\b|\bse\b', lower)
+            # Split on Hindi + English conjunctions
+            parts = re.split(r'\baur\b|\bor\b|\bya\b|\band\b|\bvs\b|\bse\b', lower)
             anchors = []
             for part in parts:
                 t = extract_time(part)
