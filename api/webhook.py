@@ -484,11 +484,11 @@ def handle(message):
         clean_text = text.replace(BOT_USERNAME, "").strip() or "Hi"
         lower = clean_text.lower()
 
-        tm = re.search(r'(uday|maa\s*vaishno|mv|vaishno)\s*target\s*(\d+)', lower)
+        tm = re.search(r'(uday|maa\s*vaishno|mv|vaishno)\s*(?:target|tgt)\s*(\d+)', lower)
         if tm:
             dist_key = tm.group(1); val = int(tm.group(2))
         else:
-            tm = re.search(r'target\s*(?:set\s*)?(uday|maa\s*vaishno|mv|vaishno)\s*(\d+)', lower)
+            tm = re.search(r'(?:target|tgt)\s*(?:set\s*)?(uday|maa\s*vaishno|mv|vaishno)\s*(\d+)', lower)
             if tm:
                 dist_key = tm.group(1); val = int(tm.group(2))
             else:
@@ -502,7 +502,7 @@ def handle(message):
                 bot.reply_to(message, f"✅ Maa Vaishno Telecom target set: {val}\n\nRoz sham 7 baje check hoga.")
             return
 
-        if "target" in lower and any(w in lower for w in ["status", "kitna", "check", "dikhao"]):
+        if ("target" in lower or "tgt" in lower) and any(w in lower for w in ["status", "kitna", "check", "dikhao"]):
             s = get_settings()
             bot.reply_to(message, f"🎯 Current Targets:\n• Uday Comm Agr: {s.get('target_uday', 0)}\n• Maa Vaishno Telecom: {s.get('target_mv', 0)}")
             return
@@ -515,7 +515,7 @@ def handle(message):
             wants_bar = "bar" in lower or "column" in lower
             wants_pie = "pie" in lower or "share" in lower or "distribution" in lower
             wants_line = "line" in lower or "trend" in lower
-            wants_all = any(w in lower for w in ["sabhi", "full", "teeno", "all", "sab"])
+            wants_all = any(w in lower for w in ["sabhi", "full", "teeno", "all", "sab", "sare"])
             bot.send_message(message.chat.id, "⏳ Graph ban raha hai...")
             if wants_all:
                 types_to_send = ["bar", "pie", "line"]
