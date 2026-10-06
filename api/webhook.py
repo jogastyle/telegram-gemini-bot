@@ -874,7 +874,7 @@ def peak_alert():
             if p:
                 u = p["distributors"].get("Uday Comm Agr", {}).get("total", 0)
                 m = p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
-        msg = "⚡ Peak hours alert\n\nSpeed up guys...\nआखिरी के कुछ घंटे बचे हुए है ‼️\nपूरी ताकत के साथ पुश करिये 📢📢\n\n"
+        msg = "⚡ 4 PM Peak Hours Alert\n\nPuri speed up guys...\n\n"
 msg += f"🔵 Uday: {u}/{tu}\n🔴 Maa Vaishno: {m}/{tm}"
         bot.send_message(GROUP_CHAT_ID, msg)
         return "Sent", 200
