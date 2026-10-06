@@ -52,7 +52,6 @@ def update_setting(key, value):
 
 app = Flask(__name__)
 
-# ================= REPORT PARSER =================
 DIST_PATTERN = re.compile(
     r'Dist\s+([A-Za-z0-9 &\.\-\']+?)\s*-\s*\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)\s*/\s*\((\d+)\)'
 )
@@ -104,19 +103,15 @@ def save_report(text, timestamp):
     except Exception as e:
         print("DB SAVE ERROR:", str(e))
 
-# ================= COMPARE =================
 def format_comparison(r_old, r_new, label_old="Pehle", label_new="Ab"):
     p_old = r_old.get("parsed") or parse_report(r_old.get("text", ""))
     p_new = r_new.get("parsed") or parse_report(r_new.get("text", ""))
     if not p_old or not p_new:
         return "Reports parse nahi ho paayi."
-
-    lines = []
-    lines.append("📊 MNP Comparison")
+    lines = ["📊 MNP Comparison"]
     lines.append(f"• {label_old}: {r_old.get('date_str','')} (till {p_old.get('report_time','?')})")
     lines.append(f"• {label_new}: {r_new.get('date_str','')} (till {p_new.get('report_time','?')})")
     lines.append("")
-
     all_dists = set(p_old["distributors"].keys()) | set(p_new["distributors"].keys())
     for d in sorted(all_dists):
         a = p_old["distributors"].get(d, {}).get("total", 0)
@@ -124,7 +119,6 @@ def format_comparison(r_old, r_new, label_old="Pehle", label_new="Ab"):
         diff = b - a
         sign = "+" if diff >= 0 else ""
         lines.append(f"• {d}: {a} → {b} ({sign}{diff})")
-
     a = (p_old["total"] or {}).get("total", 0)
     b = (p_new["total"] or {}).get("total", 0)
     diff = b - a
@@ -133,62 +127,41 @@ def format_comparison(r_old, r_new, label_old="Pehle", label_new="Ab"):
     lines.append(f"Total: {a} → {b} ({sign}{diff})")
     return "\n".join(lines)
 
-# ================= DATA FOR GRAPHS =================
 def get_daily_data(days=7):
     now = datetime.now()
     start = now - timedelta(days=days - 1)
     utc_start = start.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() - IST_OFFSET
-
     db = get_db()
     reports = list(db.find({
         "timestamp": {"$gte": utc_start},
         "text": {"$regex": "FTA MNP|FTD"}
     }).sort("timestamp", 1))
-
     daily_last = {}
     for r in reports:
         day_key = time.strftime("%Y-%m-%d", time.gmtime(r["timestamp"] + IST_OFFSET))
         daily_last[day_key] = r
-
-    days_list = []
-    uday_vals = []
-    mv_vals = []
-    total_vals = []
+    days_list, uday_vals, mv_vals, total_vals = [], [], [], []
     dist_totals_week = {}
-
     for i in range(days - 1, -1, -1):
         d = now - timedelta(days=i)
         key = d.strftime("%Y-%m-%d")
-        label = d.strftime("%d %b")
-        days_list.append(label)
-
+        days_list.append(d.strftime("%d %b"))
         r = daily_last.get(key)
         if not r:
             uday_vals.append(0); mv_vals.append(0); total_vals.append(0)
             continue
-
         p = r.get("parsed") or parse_report(r.get("text", ""))
         if not p:
             uday_vals.append(0); mv_vals.append(0); total_vals.append(0)
             continue
-
         uday = p["distributors"].get("Uday Comm Agr", {}).get("total", 0)
         mv = p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
         tot = (p.get("total") or {}).get("total", 0)
-
         uday_vals.append(uday); mv_vals.append(mv); total_vals.append(tot)
         dist_totals_week["Uday Comm Agr"] = dist_totals_week.get("Uday Comm Agr", 0) + uday
         dist_totals_week["Maa Vaishno Telecom"] = dist_totals_week.get("Maa Vaishno Telecom", 0) + mv
+    return {"labels": days_list, "uday": uday_vals, "mv": mv_vals, "total": total_vals, "dist_totals": dist_totals_week}
 
-    return {
-        "labels": days_list,
-        "uday": uday_vals,
-        "mv": mv_vals,
-        "total": total_vals,
-        "dist_totals": dist_totals_week,
-    }
-
-# ================= GRAPH BUILDERS =================
 def quickchart_url(config, width=800, height=400):
     encoded = urllib.parse.quote(json.dumps(config))
     return f"https://quickchart.io/chart?c={encoded}&w={width}&h={height}&bkg=white"
@@ -219,14 +192,8 @@ def build_pie_chart(days=7):
     values = list(dt.values()) if dt else [1]
     config = {
         "type": "doughnut",
-        "data": {
-            "labels": labels,
-            "datasets": [{"data": values, "backgroundColor": ["#2196F3", "#F44336", "#4CAF50", "#FFC107"]}]
-        },
-        "options": {
-            "title": {"display": True, "text": f"Distributor Share - Last {days} Days", "fontSize": 16},
-            "legend": {"position": "bottom"},
-        }
+        "data": {"labels": labels, "datasets": [{"data": values, "backgroundColor": ["#2196F3", "#F44336", "#4CAF50", "#FFC107"]}]},
+        "options": {"title": {"display": True, "text": f"Distributor Share - Last {days} Days", "fontSize": 16}, "legend": {"position": "bottom"}}
     }
     return quickchart_url(config)
 
@@ -242,70 +209,51 @@ def build_line_chart(days=7):
                 {"label": "Total", "data": data["total"], "borderColor": "#4CAF50", "fill": False, "tension": 0.3, "borderWidth": 3},
             ]
         },
-        "options": {
-            "title": {"display": True, "text": f"MNP Trend - Last {days} Days", "fontSize": 16},
-            "legend": {"position": "bottom"},
-        }
+        "options": {"title": {"display": True, "text": f"MNP Trend - Last {days} Days", "fontSize": 16}, "legend": {"position": "bottom"}}
     }
     return quickchart_url(config)
 
-# ================= WEEKLY SUMMARY =================
 def build_weekly_summary():
     data = get_daily_data(7)
     dist_totals = data["dist_totals"]
     day_totals = {data["labels"][i]: data["total"][i] for i in range(len(data["labels"]))}
     grand_total = sum(day_totals.values())
-
-    lines = []
-    lines.append("📊 Weekly MNP Summary")
-    lines.append("(Last 7 days)")
-    lines.append("")
-    lines.append("Distributor-wise total:")
+    lines = ["📊 Weekly MNP Summary", "(Last 7 days)", "", "Distributor-wise total:"]
     for name, val in sorted(dist_totals.items(), key=lambda x: -x[1]):
         lines.append(f"• {name}: {val}")
     lines.append("")
     lines.append(f"Grand Total: {grand_total}")
-
     nonzero = {k: v for k, v in day_totals.items() if v > 0}
     if nonzero:
         best = max(nonzero.items(), key=lambda x: x[1])
         worst = min(nonzero.items(), key=lambda x: x[1])
         lines.append(f"🏆 Best day: {best[0]} ({best[1]})")
         lines.append(f"📉 Lowest: {worst[0]} ({worst[1]})")
-
     return "\n".join(lines)
 
-# ================= DATE/TIME PARSING =================
-MONTHS = {
-    "jan":1,"january":1,"feb":2,"february":2,"mar":3,"march":3,"apr":4,"april":4,
-    "may":5,"jun":6,"june":6,"jul":7,"july":7,"aug":8,"august":8,
-    "sep":9,"sept":9,"september":9,"oct":10,"october":10,"nov":11,"november":11,
-    "dec":12,"december":12,
-}
+MONTHS = {"jan":1,"january":1,"feb":2,"february":2,"mar":3,"march":3,"apr":4,"april":4,"may":5,"jun":6,"june":6,"jul":7,"july":7,"aug":8,"august":8,"sep":9,"sept":9,"september":9,"oct":10,"october":10,"nov":11,"november":11,"dec":12,"december":12}
 
 def extract_time(text):
     lower = text.lower()
     m = re.search(r'(\d{1,2})[:\.](\d{2})', lower)
     if m:
-        h = int(m.group(1)); mi = int(m.group(2))
-        return apply_ampm(lower, m.start(), h), mi
+        return apply_ampm(lower, m.start(), int(m.group(1))), int(m.group(2))
     m = re.search(r'(\d{1,2})\s*(?:baje|bje|pm|am|bajkar)', lower)
     if m:
-        h = int(m.group(1))
-        return apply_ampm(lower, m.start(), h), 0
+        return apply_ampm(lower, m.start(), int(m.group(1))), 0
     return None
 
 def apply_ampm(text, idx, hour):
     if hour >= 13: return hour
     if hour == 12:
-        context = text[max(0, idx - 20):idx + 30]
-        if re.search(r'raat|night', context): return 0
+        ctx = text[max(0, idx - 20):idx + 30]
+        if re.search(r'raat|night', ctx): return 0
         return 12
-    context = text[max(0, idx - 20):idx + 30]
-    if re.search(r'subah|subha|saver|savere|morning|\bam\b', context): return hour
-    if re.search(r'dophar|dopahar|dopaher|afternoon', context): return hour + 12 if hour < 12 else hour
-    if re.search(r'shaam|sham|evening', context): return hour + 12 if hour < 12 else hour
-    if re.search(r'raat|night|\bpm\b', context): return hour + 12 if hour < 12 else hour
+    ctx = text[max(0, idx - 20):idx + 30]
+    if re.search(r'subah|subha|saver|savere|morning|\bam\b', ctx): return hour
+    if re.search(r'dophar|dopahar|dopaher|afternoon', ctx): return hour + 12 if hour < 12 else hour
+    if re.search(r'shaam|sham|evening', ctx): return hour + 12 if hour < 12 else hour
+    if re.search(r'raat|night|\bpm\b', ctx): return hour + 12 if hour < 12 else hour
     return hour
 
 def extract_date(text):
@@ -338,9 +286,8 @@ def find_report_at(target_date, hour, minute):
         ist_ts = datetime.combine(target_date, datetime.min.time().replace(hour=hour, minute=minute)).timestamp()
         utc_target = ist_ts - IST_OFFSET
         ist_start = datetime.combine(target_date, datetime.min.time()).timestamp()
-        ist_end = ist_start + 86400
         utc_start = ist_start - IST_OFFSET
-        utc_end = ist_end - IST_OFFSET
+        utc_end = utc_start + 86400
         db = get_db()
         reports = list(db.find({
             "timestamp": {"$gte": utc_start, "$lt": utc_end},
@@ -351,72 +298,52 @@ def find_report_at(target_date, hour, minute):
     except Exception as e:
         print("FIND ERROR:", str(e))
         return None
-
-# ================= PERFORMANCE CHECK =================
+        
 @app.route('/check-performance', methods=['GET'])
 def check_performance():
     try:
         settings = get_settings()
         target_uday = settings.get("target_uday", 0)
         target_mv = settings.get("target_mv", 0)
-
         if not target_uday and not target_mv:
             return "No targets set", 200
-
         now = datetime.now()
-        today_start_ist = datetime.combine(now.date(), datetime.min.time()).timestamp()
-        utc_start = today_start_ist - IST_OFFSET
-
+        utc_start = datetime.combine(now.date(), datetime.min.time()).timestamp() - IST_OFFSET
         db = get_db()
         reports = list(db.find({
             "timestamp": {"$gte": utc_start},
             "text": {"$regex": "FTA MNP|FTD"}
         }).sort("timestamp", -1).limit(1))
-
         if not reports:
             bot.send_message(GROUP_CHAT_ID, "⚠️ Alert: Aaj koi MNP report nahi aayi.")
             return "No reports", 200
-
         p = reports[0].get("parsed") or parse_report(reports[0]["text"])
         uday_now = p["distributors"].get("Uday Comm Agr", {}).get("total", 0)
         mv_now = p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
-
         today_str = today_ist_str()
         yesterday_str = yesterday_ist_str()
-
         alerts = []
         extra_alerts = []
-
-        # ---- Uday check ----
         if target_uday:
             if uday_now < target_uday:
                 gap = target_uday - uday_now
                 pct = int((uday_now / target_uday) * 100)
                 alerts.append(f"• Uday Comm Agr: {uday_now}/{target_uday} ({pct}%) — gap {gap}")
-
-                # Consecutive failure check
-                last_fail = settings.get("last_fail_uday")
-                if last_fail == yesterday_str:
+                if settings.get("last_fail_uday") == yesterday_str:
                     extra_alerts.append("❗ Uday Comm Agr — aap aaj bhi target pura nahi kar paye!")
                 update_setting("last_fail_uday", today_str)
             else:
-                # Reset fail count on success
                 update_setting("last_fail_uday", "")
-
-        # ---- Maa Vaishno check ----
         if target_mv:
             if mv_now < target_mv:
                 gap = target_mv - mv_now
                 pct = int((mv_now / target_mv) * 100)
                 alerts.append(f"• Maa Vaishno Telecom: {mv_now}/{target_mv} ({pct}%) — gap {gap}")
-
-                last_fail = settings.get("last_fail_mv")
-                if last_fail == yesterday_str:
+                if settings.get("last_fail_mv") == yesterday_str:
                     extra_alerts.append("❗ Maa Vaishno Telecom — aap aaj bhi target pura nahi kar paye!")
                 update_setting("last_fail_mv", today_str)
             else:
                 update_setting("last_fail_mv", "")
-
         if alerts:
             msg = "⚠️ Low Performance Alert\n\n" + "\n".join(alerts)
             if extra_alerts:
@@ -427,12 +354,10 @@ def check_performance():
                 msg += "\n✅ Maa Vaishno Telecom ne target pura kar liya!"
             bot.send_message(GROUP_CHAT_ID, msg)
             return "Alert sent", 200
-        else:
-            return "All targets achieved", 200
+        return "All targets achieved", 200
     except Exception as e:
         return "Error: " + str(e), 500
 
-# ================= ENDPOINTS =================
 @app.route('/daily-quote', methods=['GET'])
 def daily_quote():
     try:
@@ -469,16 +394,13 @@ def save_report_endpoint():
     except Exception as e:
         return "Error: " + str(e), 500
 
-# ================= MESSAGE HANDLER =================
 @bot.message_handler(func=lambda m: True)
 def handle(message):
     try:
         text = message.text or ""
         msg_ts = message.date
-
         if message.chat.id == int(GROUP_CHAT_ID) and ("FTA MNP" in text or "FTD" in text):
             save_report(text, msg_ts)
-
         is_private = message.chat.type == "private"
         is_tagged = BOT_USERNAME.lower() in text.lower()
         is_reply_to_bot = False
@@ -486,27 +408,20 @@ def handle(message):
             u = message.reply_to_message.from_user
             if u.is_bot and u.username == BOT_USERNAME.replace("@", ""):
                 is_reply_to_bot = True
-
         if not is_private and not is_tagged and not is_reply_to_bot:
             return
-
         clean_text = text.replace(BOT_USERNAME, "").strip() or "Hi"
         lower = clean_text.lower()
 
-        # -------- SET TARGET (per distributor) --------
         tm = re.search(r'(uday|maa\s*vaishno|mv|vaishno)\s*target\s*(\d+)', lower)
         if tm:
-            dist_key = tm.group(1)
-            val = int(tm.group(2))
+            dist_key = tm.group(1); val = int(tm.group(2))
         else:
             tm = re.search(r'target\s*(?:set\s*)?(uday|maa\s*vaishno|mv|vaishno)\s*(\d+)', lower)
             if tm:
-                dist_key = tm.group(1)
-                val = int(tm.group(2))
+                dist_key = tm.group(1); val = int(tm.group(2))
             else:
-                dist_key = None
-                val = None
-
+                dist_key = None; val = None
         if dist_key and val is not None and (is_tagged or is_private):
             if "uday" in dist_key:
                 set_target("uday", val)
@@ -516,32 +431,21 @@ def handle(message):
                 bot.reply_to(message, f"✅ Maa Vaishno Telecom target set: {val}\n\nRoz sham 7 baje check hoga.")
             return
 
-        # -------- CHECK TARGET STATUS --------
         if "target" in lower and any(w in lower for w in ["status", "kitna", "check", "dikhao"]):
             s = get_settings()
-            tu = s.get("target_uday", 0)
-            tmv = s.get("target_mv", 0)
-            bot.reply_to(message,
-                f"🎯 Current Targets:\n"
-                f"• Uday Comm Agr: {tu}\n"
-                f"• Maa Vaishno Telecom: {tmv}")
+            bot.reply_to(message, f"🎯 Current Targets:\n• Uday Comm Agr: {s.get('target_uday', 0)}\n• Maa Vaishno Telecom: {s.get('target_mv', 0)}")
             return
 
-        # -------- GRAPH REQUESTS --------
         wants_graph = any(w in lower for w in ["graph", "chart"])
         if wants_graph:
             days = 7
             dm = re.search(r'(\d{1,2})\s*(?:din|days)', lower)
             if dm: days = int(dm.group(1))
-
             wants_bar = "bar" in lower or "column" in lower
-            wants_pie = "pie" in lower or "share" in low
-                        wants_pie = "pie" in lower or "share" in lower or "distribution" in lower
+            wants_pie = "pie" in lower or "share" in lower or "distribution" in lower
             wants_line = "line" in lower or "trend" in lower
             wants_all = any(w in lower for w in ["sabhi", "full", "teeno", "all", "sab"])
-
             bot.send_message(message.chat.id, "⏳ Graph ban raha hai...")
-
             if wants_all:
                 types_to_send = ["bar", "pie", "line"]
             elif wants_bar and wants_pie:
@@ -556,7 +460,6 @@ def handle(message):
                 types_to_send = ["line"]
             else:
                 types_to_send = ["bar"]
-
             for t in types_to_send:
                 try:
                     if t == "bar": url = build_bar_chart(days)
@@ -568,12 +471,10 @@ def handle(message):
                     bot.send_message(message.chat.id, f"Graph error ({t}): {str(ge)}")
             return
 
-        # -------- WEEKLY SUMMARY --------
         if "weekly" in lower or "hafte ka summary" in lower or "hafte ki summary" in lower:
             bot.reply_to(message, build_weekly_summary())
             return
 
-        # -------- COMPARE --------
         wants_compare = any(w in lower for w in ["compare", "farq", "antar", "difference", "vs"])
         if wants_compare:
             parts = re.split(r'\baur\b|\bor\b|\bya\b|\band\b|\bvs\b|\bse\b', lower)
@@ -583,29 +484,24 @@ def handle(message):
                 d = extract_date(part)
                 if t or d:
                     anchors.append((d, t))
-
             if len(anchors) >= 2:
                 a1, a2 = anchors[0], anchors[1]
                 d1 = a1[0] or (datetime.now().date() - timedelta(days=1))
                 d2 = a2[0] or datetime.now().date()
                 t1 = a1[1] or (12, 0)
                 t2 = a2[1] or (12, 0)
-
                 r1 = find_report_at(d1, t1[0], t1[1])
                 r2 = find_report_at(d2, t2[0], t2[1])
-
                 if not r1:
                     bot.reply_to(message, f"{d1.strftime('%d %b')} {t1[0]:02d}:{t1[1]:02d} ke aas-paas koi MNP report nahi mili.")
                     return
                 if not r2:
                     bot.reply_to(message, f"{d2.strftime('%d %b')} {t2[0]:02d}:{t2[1]:02d} ke aas-paas koi MNP report nahi mili.")
                     return
-
                 label_old = f"{d1.strftime('%d %b')} {t1[0]:02d}:{t1[1]:02d}"
                 label_new = f"{d2.strftime('%d %b')} {t2[0]:02d}:{t2[1]:02d}"
                 bot.reply_to(message, format_comparison(r1, r2, label_old, label_new))
                 return
-
             db = get_db()
             last_two = list(db.find({"text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", -1).limit(2))
             if len(last_two) >= 2:
@@ -616,7 +512,6 @@ def handle(message):
                 bot.reply_to(message, "Database mein kam se kam 2 MNP reports chahiye.")
                 return
 
-        # -------- NORMAL AI --------
         response = client.chat.completions.create(
             messages=[
                 {"role": "system", "content": "You are a helpful Telegram assistant. Reply in same language. Answer in 1-3 lines."},
@@ -625,14 +520,12 @@ def handle(message):
             model="openai/gpt-oss-20b",
         )
         bot.reply_to(message, response.choices[0].message.content)
-
     except Exception as e:
         try:
             bot.reply_to(message, "Error: " + str(e))
         except:
             pass
 
-# ================= WEBHOOK =================
 @app.route('/', methods=['POST'])
 def webhook():
     try:
