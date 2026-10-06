@@ -191,10 +191,7 @@ def build_bar_chart(days=7):
             "legend": {"position": "bottom"},
             "plugins": {
                 "datalabels": {
-                    "display": True,
-                    "color": "white",
-                    "anchor": "center",
-                    "align": "center",
+                    "display": True, "color": "white", "anchor": "center", "align": "center",
                     "font": {"size": 11, "weight": "bold"},
                     "formatter": "function(value) { return value > 0 ? value : ''; }"
                 }
@@ -216,8 +213,7 @@ def build_pie_chart(days=7):
             "legend": {"position": "bottom"},
             "plugins": {
                 "datalabels": {
-                    "display": True,
-                    "color": "white",
+                    "display": True, "color": "white",
                     "font": {"size": 12, "weight": "bold"},
                     "formatter": "function(value, ctx) { var sum = ctx.dataset.data.reduce(function(a,b){return a+b;}, 0); var pct = Math.round(value / sum * 100); return value + '\\n(' + pct + '%)'; }"
                 }
@@ -234,53 +230,16 @@ def build_line_chart(days=7):
             "labels": data["labels"],
             "datasets": [
                 {
-                    "label": "Uday Comm Agr",
-                    "data": data["uday"],
-                    "borderColor": "#2196F3",
-                    "fill": False,
-                    "tension": 0.3,
-                    "datalabels": {
-                        "display": True,
-                        "align": "top",
-                        "anchor": "end",
-                        "offset": 6,
-                        "color": "#1565C0",
-                        "font": {"size": 10, "weight": "bold"},
-                        "formatter": "function(value) { return value > 0 ? value : ''; }"
-                    }
+                    "label": "Uday Comm Agr", "data": data["uday"], "borderColor": "#2196F3", "fill": False, "tension": 0.3,
+                    "datalabels": {"display": True, "align": "top", "anchor": "end", "offset": 6, "color": "#1565C0", "font": {"size": 10, "weight": "bold"}, "formatter": "function(value) { return value > 0 ? value : ''; }"}
                 },
                 {
-                    "label": "Maa Vaishno Telecom",
-                    "data": data["mv"],
-                    "borderColor": "#F44336",
-                    "fill": False,
-                    "tension": 0.3,
-                    "datalabels": {
-                        "display": True,
-                        "align": "bottom",
-                        "anchor": "end",
-                        "offset": 6,
-                        "color": "#B71C1C",
-                        "font": {"size": 10, "weight": "bold"},
-                        "formatter": "function(value) { return value > 0 ? value : ''; }"
-                    }
+                    "label": "Maa Vaishno Telecom", "data": data["mv"], "borderColor": "#F44336", "fill": False, "tension": 0.3,
+                    "datalabels": {"display": True, "align": "bottom", "anchor": "end", "offset": 6, "color": "#B71C1C", "font": {"size": 10, "weight": "bold"}, "formatter": "function(value) { return value > 0 ? value : ''; }"}
                 },
                 {
-                    "label": "Total",
-                    "data": data["total"],
-                    "borderColor": "#4CAF50",
-                    "fill": False,
-                    "tension": 0.3,
-                    "borderWidth": 3,
-                    "datalabels": {
-                        "display": True,
-                        "align": "top",
-                        "anchor": "end",
-                        "offset": 20,
-                        "color": "#1B5E20",
-                        "font": {"size": 11, "weight": "bold"},
-                        "formatter": "function(value) { return value > 0 ? value : ''; }"
-                    }
+                    "label": "Total", "data": data["total"], "borderColor": "#4CAF50", "fill": False, "tension": 0.3, "borderWidth": 3,
+                    "datalabels": {"display": True, "align": "top", "anchor": "end", "offset": 20, "color": "#1B5E20", "font": {"size": 11, "weight": "bold"}, "formatter": "function(value) { return value > 0 ? value : ''; }"}
                 },
             ]
         },
@@ -384,10 +343,8 @@ def send_performance_alert(target_hour=None, target_minute=None):
     target_mv = settings.get("target_mv", 0)
     if not target_uday and not target_mv:
         return "❌ Koi target set nahi. Pehle 'uday tgt 80' aur 'mv tgt 100' set karo."
-
     now = datetime.now()
     today_date = now.date()
-
     if target_hour is not None:
         r = find_report_at(today_date, target_hour, target_minute or 0)
         if not r:
@@ -404,18 +361,15 @@ def send_performance_alert(target_hour=None, target_minute=None):
             return "⚠️ Aaj koi MNP report nahi aayi."
         r = reports[0]
         time_label = "latest"
-
     p = r.get("parsed") or parse_report(r.get("text", ""))
     if not p:
         return "❌ Report parse nahi ho paayi."
-
     uday_now = p["distributors"].get("Uday Comm Agr", {}).get("total", 0)
     mv_now = p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
     today_str = today_ist_str()
     yesterday_str = yesterday_ist_str()
     alerts = []
     extra_alerts = []
-
     if target_uday:
         if uday_now < target_uday:
             gap = target_uday - uday_now
@@ -426,7 +380,6 @@ def send_performance_alert(target_hour=None, target_minute=None):
             update_setting("last_fail_uday", today_str)
         else:
             update_setting("last_fail_uday", "")
-
     if target_mv:
         if mv_now < target_mv:
             gap = target_mv - mv_now
@@ -437,7 +390,6 @@ def send_performance_alert(target_hour=None, target_minute=None):
             update_setting("last_fail_mv", today_str)
         else:
             update_setting("last_fail_mv", "")
-
     if alerts:
         msg = f"⚠️ Low Performance Alert ({time_label})\n\n" + "\n".join(alerts)
         if extra_alerts:
@@ -481,7 +433,6 @@ def send_projection(period="day"):
     now = datetime.now()
     today = now.date()
     db = get_db()
-
     if period == "day":
         utc_today = datetime.combine(today, datetime.min.time()).timestamp() - IST_OFFSET
         today_reports = list(db.find({
@@ -504,24 +455,16 @@ def send_projection(period="day"):
         elapsed = max(0.5, current_hour - eff_start)
         remaining = max(0, wh_end - current_hour)
         if remaining <= 0:
-            msg = f"📈 Aaj ka final (working hours khatam)\n\n"
-            msg += f"• Uday: {uday_today}\n• Maa Vaishno: {mv_today}\n• Total: {total_today}"
-            return msg
+            return f"📈 Aaj ka final (working hours khatam)\n\n• Uday: {uday_today}\n• Maa Vaishno: {mv_today}\n• Total: {total_today}"
         rate_uday = uday_today / elapsed
         rate_mv = mv_today / elapsed
         rate_total = total_today / elapsed
         proj_uday = int(rate_uday * (elapsed + remaining))
         proj_mv = int(rate_mv * (elapsed + remaining))
         proj_total = int(rate_total * (elapsed + remaining))
-        msg = f"📈 Aaj ki Projection\n\n"
-        msg += f"Abhi tak ({last_ist.strftime('%H:%M')}):\n"
-        msg += f"• Uday: {uday_today}\n• Maa Vaishno: {mv_today}\n• Total: {total_today}\n\n"
-        msg += f"Expected ({int(wh_end)}:00 tak):\n"
-        msg += f"• Uday: ~{proj_uday}\n"
-        msg += f"• Maa Vaishno: ~{proj_mv}\n"
-        msg += f"• Total: ~{proj_total}"
+        msg = f"📈 Aaj ki Projection\n\nAbhi tak ({last_ist.strftime('%H:%M')}):\n• Uday: {uday_today}\n• Maa Vaishno: {mv_today}\n• Total: {total_today}\n\n"
+        msg += f"Expected ({int(wh_end)}:00 tak):\n• Uday: ~{proj_uday}\n• Maa Vaishno: ~{proj_mv}\n• Total: ~{proj_total}"
         return msg
-
     elif period == "week":
         days_since_monday = today.weekday()
         monday = today - timedelta(days=days_since_monday)
@@ -534,8 +477,7 @@ def send_projection(period="day"):
         for r in week_reports:
             key = time.strftime("%Y-%m-%d", time.gmtime(r["timestamp"] + IST_OFFSET))
             daily[key] = r
-        week_total = 0
-        days_done = 0
+        week_total = 0; days_done = 0
         for k, r in daily.items():
             p = r.get("parsed") or parse_report(r.get("text", ""))
             if p:
@@ -544,13 +486,7 @@ def send_projection(period="day"):
         remaining_days = 7 - today.weekday() - 1
         avg_daily = get_historical_daily_avg(30)
         proj = week_total + (avg_daily * remaining_days)
-        msg = f"📊 Weekly Projection\n\n"
-        msg += f"Is hafte abhi tak: {week_total} ({days_done} din)\n"
-        msg += f"Historical avg: {int(avg_daily)}/din\n"
-        msg += f"Bache hue {remaining_days} din: ~{int(avg_daily * remaining_days)}\n\n"
-        msg += f"Expected week total: ~{int(proj)}"
-        return msg
-
+        return f"📊 Weekly Projection\n\nIs hafte abhi tak: {week_total} ({days_done} din)\nHistorical avg: {int(avg_daily)}/din\nBache hue {remaining_days} din: ~{int(avg_daily * remaining_days)}\n\nExpected week total: ~{int(proj)}"
     elif period == "month":
         month_start = today.replace(day=1)
         utc_month = datetime.combine(month_start, datetime.min.time()).timestamp() - IST_OFFSET
@@ -562,8 +498,7 @@ def send_projection(period="day"):
         for r in month_reports:
             key = time.strftime("%Y-%m-%d", time.gmtime(r["timestamp"] + IST_OFFSET))
             monthly[key] = r
-        month_total = 0
-        days_done = 0
+        month_total = 0; days_done = 0
         for k, r in monthly.items():
             p = r.get("parsed") or parse_report(r.get("text", ""))
             if p:
@@ -576,20 +511,199 @@ def send_projection(period="day"):
         days_in_month = (next_month - month_start).days
         remaining_days = days_in_month - today.day
         avg_daily = get_historical_daily_avg(30)
-        if days_done > 0:
-            avg_this_month = month_total / days_done
-        else:
-            avg_this_month = 0
+        avg_this_month = month_total / days_done if days_done > 0 else 0
         best_avg = max(avg_daily, avg_this_month) if days_done > 0 else avg_daily
         proj = month_total + (best_avg * remaining_days)
-        msg = f"📅 Monthly Projection ({month_start.strftime('%b %Y')})\n\n"
-        msg += f"Abhi tak: {month_total} ({days_done} din)\n"
-        msg += f"Daily avg: {int(avg_this_month)}/din\n"
-        msg += f"Bache hue {remaining_days} din: ~{int(best_avg * remaining_days)}\n\n"
-        msg += f"Expected month total: ~{int(proj)}"
-        return msg
-
+        return f"📅 Monthly Projection ({month_start.strftime('%b %Y')})\n\nAbhi tak: {month_total} ({days_done} din)\nDaily avg: {int(avg_this_month)}/din\nBache hue {remaining_days} din: ~{int(best_avg * remaining_days)}\n\nExpected month total: ~{int(proj)}"
     return "❌ Period samjha nahi."
+    
+# ============ BATCH 1: NEW ANALYTICS ============
+
+def send_peak_hours(days=7):
+    """2.a - Peak hours analysis"""
+    now = datetime.now()
+    start = now - timedelta(days=days-1)
+    utc_start = start.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() - IST_OFFSET
+    db = get_db()
+    reports = list(db.find({
+        "timestamp": {"$gte": utc_start},
+        "text": {"$regex": "FTA MNP|FTD"}
+    }).sort("timestamp", 1))
+    if not reports:
+        return "❌ Koi report nahi mili."
+    by_date = {}
+    for r in reports:
+        ist_dt = datetime.fromtimestamp(r["timestamp"] + IST_OFFSET)
+        day_key = ist_dt.strftime("%Y-%m-%d")
+        by_date.setdefault(day_key, []).append(r)
+    hourly = {}
+    for day_key, day_reports in by_date.items():
+        prev_total = 0
+        for r in day_reports:
+            p = r.get("parsed") or parse_report(r.get("text", ""))
+            if not p: continue
+            cur_total = (p.get("total") or {}).get("total", 0)
+            delta = cur_total - prev_total
+            if delta > 0:
+                ist_dt = datetime.fromtimestamp(r["timestamp"] + IST_OFFSET)
+                hour = ist_dt.hour
+                hourly[hour] = hourly.get(hour, 0) + delta
+            prev_total = cur_total
+    if not hourly:
+        return "❌ Data parse nahi ho paaya."
+    sorted_hours = sorted(hourly.items(), key=lambda x: -x[1])[:5]
+    lines = [f"🕐 Peak Hours (last {days} days)", ""]
+    for h, count in sorted_hours:
+        lines.append(f"• {h:02d}:00 - {h+1:02d}:00 → {count} MNP")
+    return "\n".join(lines)
+
+def send_distributor_comparison(days=7):
+    """2.b - Distributor comparison"""
+    data = get_daily_data(days)
+    uday_total = sum(data["uday"])
+    mv_total = sum(data["mv"])
+    if uday_total == 0 and mv_total == 0:
+        return "❌ Koi data nahi."
+    total = uday_total + mv_total
+    uday_pct = int((uday_total / total) * 100) if total else 0
+    mv_pct = int((mv_total / total) * 100) if total else 0
+    days_with_data = len([x for x in data["total"] if x > 0])
+    uday_avg = int(uday_total / days_with_data) if days_with_data else 0
+    mv_avg = int(mv_total / days_with_data) if days_with_data else 0
+    uday_best_idx = data["uday"].index(max(data["uday"])) if data["uday"] else 0
+    mv_best_idx = data["mv"].index(max(data["mv"])) if data["mv"] else 0
+    winner = "Uday Comm Agr" if uday_total > mv_total else ("Maa Vaishno Telecom" if mv_total > uday_total else "Tie")
+    lines = [f"⚖️ Distributor Comparison (last {days} days)", ""]
+    lines.append(f"🔵 Uday Comm Agr: {uday_total} ({uday_pct}%)")
+    lines.append(f"   Avg: {uday_avg}/din | Best: {data['labels'][uday_best_idx]} ({max(data['uday'])})")
+    lines.append("")
+    lines.append(f"🔴 Maa Vaishno: {mv_total} ({mv_pct}%)")
+    lines.append(f"   Avg: {mv_avg}/din | Best: {data['labels'][mv_best_idx]} ({max(data['mv'])})")
+    lines.append("")
+    lines.append(f"🏆 Winner: {winner}")
+    return "\n".join(lines)
+
+def send_growth_rate(period="week"):
+    """2.c - Growth rate"""
+    db = get_db()
+    now = datetime.now()
+    today = now.date()
+    def sum_period(start_ts, end_ts):
+        reps = list(db.find({
+            "timestamp": {"$gte": start_ts, "$lte": end_ts},
+            "text": {"$regex": "FTA MNP|FTD"}
+        }).sort("timestamp", 1))
+        daily = {}
+        for r in reps:
+            key = time.strftime("%Y-%m-%d", time.gmtime(r["timestamp"] + IST_OFFSET))
+            daily[key] = r
+        tot = 0
+        for k, r in daily.items():
+            p = r.get("parsed") or parse_report(r.get("text", ""))
+            if p:
+                tot += (p.get("total") or {}).get("total", 0)
+        return tot
+    if period == "week":
+        days_since_monday = today.weekday()
+        this_monday = today - timedelta(days=days_since_monday)
+        last_monday = this_monday - timedelta(days=7)
+        this_start = datetime.combine(this_monday, datetime.min.time()).timestamp() - IST_OFFSET
+        last_start = datetime.combine(last_monday, datetime.min.time()).timestamp() - IST_OFFSET
+        days_done = days_since_monday + 1
+        last_aligned_end = last_monday + timedelta(days=days_done - 1)
+        last_aligned_end_ts = datetime.combine(last_aligned_end, datetime.max.time()).timestamp() - IST_OFFSET
+        this_total = sum_period(this_start, now.timestamp())
+        last_total = sum_period(last_start, last_aligned_end_ts)
+        growth_pct = int(((this_total - last_total) / last_total) * 100) if last_total else 0
+        sign = "+" if growth_pct >= 0 else ""
+        arrow = "📈" if growth_pct >= 0 else "📉"
+        return f"{arrow} Growth Rate (Week)\n\nThis week ({days_done} din): {this_total}\nLast week (same days): {last_total}\nGrowth: {sign}{growth_pct}%"
+    elif period == "month":
+        this_month_start = today.replace(day=1)
+        if this_month_start.month == 1:
+            last_month_start = this_month_start.replace(year=this_month_start.year-1, month=12)
+        else:
+            last_month_start = this_month_start.replace(month=this_month_start.month-1)
+        this_start = datetime.combine(this_month_start, datetime.min.time()).timestamp() - IST_OFFSET
+        last_start = datetime.combine(last_month_start, datetime.min.time()).timestamp() - IST_OFFSET
+        last_aligned_end = last_month_start + timedelta(days=today.day-1)
+        last_aligned_end_ts = datetime.combine(last_aligned_end, datetime.max.time()).timestamp() - IST_OFFSET
+        this_total = sum_period(this_start, now.timestamp())
+        last_total = sum_period(last_start, last_aligned_end_ts)
+        growth_pct = int(((this_total - last_total) / last_total) * 100) if last_total else 0
+        sign = "+" if growth_pct >= 0 else ""
+        arrow = "📈" if growth_pct >= 0 else "📉"
+        return f"{arrow} Growth Rate (Month)\n\nThis month ({today.day} din): {this_total}\nLast month (same days): {last_total}\nGrowth: {sign}{growth_pct}%"
+    return "❌ Period samjha nahi."
+
+def send_target_achievement(period="month"):
+    """2.d - Target achievement rate"""
+    settings = get_settings()
+    target_uday = settings.get("target_uday", 0)
+    target_mv = settings.get("target_mv", 0)
+    if not target_uday and not target_mv:
+        return "❌ Pehle target set karo."
+    now = datetime.now()
+    today = now.date()
+    if period == "month":
+        start_date = today.replace(day=1)
+    else:
+        days_since_monday = today.weekday()
+        start_date = today - timedelta(days=days_since_monday)
+    utc_start = datetime.combine(start_date, datetime.min.time()).timestamp() - IST_OFFSET
+    db = get_db()
+    reports = list(db.find({
+        "timestamp": {"$gte": utc_start},
+        "text": {"$regex": "FTA MNP|FTD"}
+    }).sort("timestamp", 1))
+    daily = {}
+    for r in reports:
+        key = time.strftime("%Y-%m-%d", time.gmtime(r["timestamp"] + IST_OFFSET))
+        daily[key] = r
+    uday_pass = 0; mv_pass = 0
+    total_days = len(daily)
+    for k, r in daily.items():
+        p = r.get("parsed") or parse_report(r.get("text", ""))
+        if not p: continue
+        u = p["distributors"].get("Uday Comm Agr", {}).get("total", 0)
+        m = p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
+        if target_uday and u >= target_uday: uday_pass += 1
+        if target_mv and m >= target_mv: mv_pass += 1
+    uday_rate = int((uday_pass / total_days) * 100) if total_days else 0
+    mv_rate = int((mv_pass / total_days) * 100) if total_days else 0
+    period_label = "is mahine" if period == "month" else "is hafte"
+    lines = [f"🎯 Target Achievement ({period_label})", ""]
+    lines.append(f"Total din: {total_days}")
+    lines.append("")
+    if target_uday:
+        lines.append(f"🔵 Uday: {uday_pass}/{total_days} din pass ({uday_rate}%)")
+    if target_mv:
+        lines.append(f"🔴 Maa Vaishno: {mv_pass}/{total_days} din pass ({mv_rate}%)")
+    return "\n".join(lines)
+
+def send_custom_report(distributor, days=7):
+    """7.a - Custom distributor report"""
+    data = get_daily_data(days)
+    dist_lower = distributor.lower()
+    if "uday" in dist_lower:
+        vals = data["uday"]; name = "Uday Comm Agr"; emoji = "🔵"
+    elif "vaishno" in dist_lower or "mv" in dist_lower:
+        vals = data["mv"]; name = "Maa Vaishno Telecom"; emoji = "🔴"
+    else:
+        return f"❌ Distributor '{distributor}' nahi pehchana. 'uday' ya 'mv' likho."
+    total = sum(vals)
+    days_data = len([v for v in vals if v > 0])
+    avg = int(total / days_data) if days_data else 0
+    best_idx = vals.index(max(vals)) if vals else 0
+    lines = [f"{emoji} {name} - Last {days} Days", ""]
+    lines.append(f"Total: {total}")
+    lines.append(f"Daily avg: {avg}/din")
+    lines.append(f"Best day: {data['labels'][best_idx]} ({max(vals)})")
+    lines.append("")
+    lines.append("Daily breakdown:")
+    for i, label in enumerate(data["labels"]):
+        lines.append(f"• {label}: {vals[i]}")
+    return "\n".join(lines)
 
 @app.route('/check-performance', methods=['GET'])
 def check_performance():
@@ -699,6 +813,48 @@ def handle(message):
             bot.reply_to(message, f"🎯 Current Targets:\n• Uday Comm Agr: {s.get('target_uday', 0)}\n• Maa Vaishno Telecom: {s.get('target_mv', 0)}\n\n⏰ Working hours: {int(ws)}:00 se {int(we)}:00")
             return
 
+        # BATCH 1: NEW ANALYTICS
+        # 2.a Peak Hours
+        if any(w in lower for w in ["peak hour", "peak hours", "peak time", "kis time sabse zyada", "kab sabse zyada"]):
+            days = 7
+            dm = re.search(r'(\d{1,2})\s*(?:din|days)', lower)
+            if dm: days = int(dm.group(1))
+            bot.reply_to(message, send_peak_hours(days))
+            return
+
+        # 2.b Distributor Comparison
+        if any(w in lower for w in ["distributor comparison", "dono distributor", "uday vs", "mv vs", "uday aur mv compare", "kaun better", "kaun aage"]):
+            days = 7
+            dm = re.search(r'(\d{1,2})\s*(?:din|days)', lower)
+            if dm: days = int(dm.group(1))
+            bot.reply_to(message, send_distributor_comparison(days))
+            return
+
+        # 2.c Growth Rate
+        if any(w in lower for w in ["growth", "growth rate", "kitne percent badha", "kitna badha", "vikas"]):
+            if any(w in lower for w in ["month", "mahine", "mahina"]):
+                bot.reply_to(message, send_growth_rate("month"))
+            else:
+                bot.reply_to(message, send_growth_rate("week"))
+            return
+
+        # 2.d Target Achievement Rate
+        if any(w in lower for w in ["target achievement", "target rate", "kitne din target pura", "achievement rate"]):
+            if any(w in lower for w in ["month", "mahine", "mahina"]):
+                bot.reply_to(message, send_target_achievement("month"))
+            else:
+                bot.reply_to(message, send_target_achievement("week"))
+            return
+
+        # 7.a Custom Report
+        cr = re.search(r'(uday|mv|maa\s*vaishno|vaishno)\s*(?:ka\s*)?report', lower)
+        if cr and ("report" in lower or "raport" in lower):
+            days = 7
+            dm = re.search(r'(\d{1,2})\s*(?:din|days)', lower)
+            if dm: days = int(dm.group(1))
+            bot.reply_to(message, send_custom_report(cr.group(1), days))
+            return
+
         # PROJECTION
         wants_proj = any(w in lower for w in ["projection", "prediction", "predict", "forecast", "estimate", "anuman"])
         if wants_proj:
@@ -781,7 +937,7 @@ def handle(message):
             return
 
         # COMPARE
-        wants_compare = any(w in lower for w in ["compare", "farq", "antar", "difference", "vs"])
+        wants_compare = any(w in lower for w in ["compare", "farq", "antar", "difference"])
         if wants_compare:
             parts = re.split(r'\baur\b|\bor\b|\bya\b|\band\b|\bvs\b|\bse\b', lower)
             anchors = []
