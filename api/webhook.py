@@ -1060,4 +1060,5 @@ def index():
 @app.route('/test', methods=['GET'])
 def test():
     return "Token: " + ("SET" if BOT_TOKEN else "MISSING") + ", Groq: " + ("SET" if GROQ_KEY else "MISSING") + ", DB: " + ("SET" if MONGO_URL else "MISSING")
-    
+    # Vercel entrypoint compatibility
+app.app = app
