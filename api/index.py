@@ -480,8 +480,10 @@ def stock_chk(th=3):
     tots = []
     for r in daily.values():
         p = parse_mnp(r.get("text", ""))
-        if p: tots.append((p.get("total") or {}).get("total", 0))
+        if p:
+            tots.append((p.get("total") or {}).get("total", 0))
     return sum(tots)/len(tots) if tots else 0
+
 
 def projection(period="day"):
     ws, we = get_wh()
