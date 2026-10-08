@@ -4,8 +4,6 @@ from groq import Groq
 from pymongo import MongoClient
 from flask import Flask, request
 
-app = Flask(__name__)
-
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 GROQ_KEY = os.environ.get("GROQ_KEY")
 MONGO_URL = os.environ.get("MONGO_URL")
@@ -18,22 +16,15 @@ ADMIN_USER_IDS = []
 
 PERMS = {
     "graphs": (True, True), "projections": (True, True), "performance": (True, True),
-    "weekly_summary": (True, False), "compare": (True, False), "custom_report": (True, True),
+    "weekly_summary": (True, True), "compare": (True, False), "custom_report": (True, True),
     "menu": (True, True), "target_set": (True, False),
     "working_hours": (True, False), "stock_threshold": (True, False),
     "stock_check": (True, True), "target_status": (True, False),
     "peak_hours": (True, False), "distributors": (True, True),
 }
 
-try:
-    bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
-except Exception:
-    bot = None
-
-try:
-    client = Groq(api_key=GROQ_KEY) if GROQ_KEY else None
-except Exception:
-    client = None
+bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
+client = Groq(api_key=GROQ_KEY)
 _db = None
 
 def get_db():
@@ -84,6 +75,7 @@ def check_perm(key, adm):
 
 MSISDN_MAP = {"9997389467": "Uday Comm Agr", "7895110381": "Maa Vaishno Telecom"}
 
+app = Flask(__name__)
 
 DIST_P = re.compile(r'Dist\s+([A-Za-z0-9 &\.\-\']+?)\s*-\s*\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)\s*/\s*\((\d+)\)')
 TOT_P = re.compile(r'^Total\s*-\s*\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)\s*/\s*\((\d+)\)', re.M)
@@ -210,7 +202,8 @@ def line_chart(days=7, mtd=False):
         "options": {"title": {"display": True, "text": title_txt, "fontSize": 16},
         "legend": {"position": "bottom"}, "layout": {"padding": {"top": 40}}}}
     return qc(cfg)
-    def weekly_sum():
+
+def weekly_sum():
     d = daily_data(7)
     dt = d["dist_totals"]
     u_total = dt.get("Uday Comm Agr", 0)
@@ -230,8 +223,7 @@ def line_chart(days=7, mtd=False):
         lines.append(f"🏆 Best day: {b[0]} ({b[1]})")
         lines.append(f"📉 Lowest: {w[0]} ({w[1]})")
     return "\n".join(lines)
-
-def monthly_sum():
+    def monthly_sum():
     now = datetime.now()
     today = now.date()
     ms = today.replace(day=1)
@@ -317,7 +309,8 @@ def find_rep(dt, h, mi):
         reps = list(get_db().find({"timestamp": {"$gte": s, "$lt": e}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", 1))
         return min(reps, key=lambda r: abs(r["timestamp"] - ut)) if reps else None
     except: return None
-       def perf_alert(h=None, mi=None):
+
+def perf_alert(h=None, mi=None):
     s = get_settings()
     tu = s.get("target_day_uday", 0)
     tm = s.get("target_day_mv", 0)
@@ -391,8 +384,7 @@ def stock_chk(th=3):
         n = MSISDN_MAP.get(it["msisdn"], it["msisdn"])
         lines.append(f"🔹 {n}: {it['stock_days']} din")
     return "\n".join(lines)
-
-def hist_avg(days=30):
+    def hist_avg(days=30):
     now = datetime.now()
     ed = now.date() - timedelta(days=1)
     sd = ed - timedelta(days=days-1)
@@ -635,7 +627,7 @@ def day_ach():
             lines.append("")
             lines.append(f"📌 Overall: {t}/{tt} ({pct}%) — {mark}")
     return "\n".join(lines)
-def peak_hours(days=7):
+    def peak_hours(days=7):
     now = datetime.now()
     s = now - timedelta(days=days-1)
     us = s.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() - IST
@@ -1016,7 +1008,7 @@ def handle(message):
                 hr = int(savem.group(3))
                 mi = int(savem.group(4)) if savem.group(4) else 0
                 if mstr not in MON:
-                    bot.reply_to(message, "❌ Month samjha nahi. Jaise: save as 1 oct 22 baje")
+                    bot.reply_to(message, "❌ Month samjha nahi. Jaise: save as 1 oct 22")
                     return
                 yr = datetime.now().year
                 dt = datetime(yr, MON[mstr], dyy, hr, mi)
@@ -1055,7 +1047,7 @@ def handle(message):
             bot.reply_to(message, f"{r}\n\nUsername: @{un or 'not set'}\nUser ID: {uid}")
             return
 
-        # ===== NEW MENU =====
+        # ===== NAYA MENU =====
         if lo.strip() in ["/start", "/menu", "menu", "start", "help", "commands"]:
             if not check_perm("menu", adm):
                 bot.reply_to(message, "❌ Menu currently disabled hai.")
@@ -1068,10 +1060,10 @@ def handle(message):
                 InlineKeyboardButton("🎯 Performance", callback_data="menu_perf"),
                 InlineKeyboardButton("🚨 Stock Check", callback_data="stock_check"),
                 InlineKeyboardButton("⚖️ Distributors", callback_data="dist_compare"),
+                InlineKeyboardButton("📋 Weekly Summary", callback_data="weekly_summary"),
             )
             if adm:
                 kb.add(
-                    InlineKeyboardButton("📋 Weekly Summary", callback_data="weekly_summary"),
                     InlineKeyboardButton("🏆 Peak Hours", callback_data="peak_hours"),
                     InlineKeyboardButton("🎯 Target Status", callback_data="tgt_status"),
                 )
@@ -1461,10 +1453,10 @@ def cb(call):
                 InlineKeyboardButton("🎯 Performance", callback_data="menu_perf"),
                 InlineKeyboardButton("🚨 Stock Check", callback_data="stock_check"),
                 InlineKeyboardButton("⚖️ Distributors", callback_data="dist_compare"),
+                InlineKeyboardButton("📋 Weekly Summary", callback_data="weekly_summary"),
             )
             if adm:
                 kb.add(
-                    InlineKeyboardButton("📋 Weekly Summary", callback_data="weekly_summary"),
                     InlineKeyboardButton("🏆 Peak Hours", callback_data="peak_hours"),
                     InlineKeyboardButton("🎯 Target Status", callback_data="tgt_status"),
                 )
@@ -1533,7 +1525,9 @@ def cb(call):
             bot.send_message(call.message.chat.id, "Error: " + str(e))
         except:
             pass
-          @app.route('/', methods=['POST'])
+
+
+@app.route('/', methods=['POST'])
 def webhook():
     try:
         u = telebot.types.Update.de_json(request.stream.read().decode('utf-8'))
@@ -1542,12 +1536,16 @@ def webhook():
         print("WEBHOOK ERROR:", str(e))
     return "OK", 200
 
+
 @app.route('/', methods=['GET'])
 def index():
     return "Bot is running!", 200
 
+
 @app.route('/test', methods=['GET'])
 def test():
-    return "Token: " + ("SET" if BOT_TOKEN else "MISSING") + ", Groq: " + ("SET" if GROQ_KEY else "MISSING") + ", DB: " + ("SET" if MONGO_URL else "MISSING")  
+    return "Token: " + ("SET" if BOT_TOKEN else "MISSING") + ", Groq: " + ("SET" if GROQ_KEY else "MISSING") + ", DB: " + ("SET" if MONGO_URL else "MISSING")
+
+
 application = app
 handler = app
