@@ -467,9 +467,8 @@ def stock_chk(th=3):
         n = MSISDN_MAP.get(it["msisdn"], it["msisdn"])
         lines.append(f"🔹 {n}: {it['stock_days']} din")
     return "\n".join(lines)
-    def hist_avg(days=30):
-    return 0
-
+    def hist_avg(days=30): return 0
+        
 
 def projection(period="day"):
     ws, we = get_wh()
