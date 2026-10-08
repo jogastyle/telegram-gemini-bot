@@ -4,6 +4,9 @@ from groq import Groq
 from pymongo import MongoClient
 from flask import Flask, request
 
+app = Flask(__name__)
+handler = app
+
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 GROQ_KEY = os.environ.get("GROQ_KEY")
 MONGO_URL = os.environ.get("MONGO_URL")
@@ -11,7 +14,7 @@ GROUP_CHAT_ID = "-1004368616206"
 BOT_USERNAME = "@DTR_Mainpuri_Bot"
 IST = 5 * 3600 + 30 * 60
 
-ADMIN_USERNAMES = ["AkashV47"]
+ADMIN_USERNAMES = ["AkashV47","DTR_Mainpuri_Bot"]
 ADMIN_USER_IDS = []
 
 PERMS = {
