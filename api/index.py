@@ -1077,7 +1077,7 @@ def handle(message):
                 )
             bot.reply_to(message, "🤖 DTR Mainpuri Bot Menu\n\nKya dekhna chahte ho?", reply_markup=kb)
             return
-                whm = re.search(r'working\s*hours?\s*(\d{1,2})(?::(\d{2}))?\s*(?:se|to|-)\s*(\d{1,2})(?::(\d{2}))?', lo)
+               whm = re.search(r'working\s*hours?\s*(\d{1,2})(?::(\d{2}))?\s*(?:se|to|-)\s*(\d{1,2})(?::(\d{2}))?', lo)
     if whm and (is_tag or is_priv):
         if not check_perm("working_hours", adm):
             bot.reply_to(message, "❌ Sirf admins.")
@@ -1384,7 +1384,7 @@ except Exception as e:
         bot.reply_to(message, "Error: " + str(e))
     except:
         pass
-        BTN_MAP = {
+BTN_MAP = {
     "graph_bar": "graphs", "graph_pie": "graphs", "graph_line": "graphs",
     "graph_bar_mtd": "graphs", "graph_pie_mtd": "graphs", "graph_line_mtd": "graphs",
     "proj_day": "projections", "proj_week": "projections", "proj_month": "projections",
