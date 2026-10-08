@@ -119,7 +119,8 @@ def quick_chart(config):
     except:
         return None
 
-def bar_chart(7, is_mtd=False):
+def bar_chart(days=7, is_mtd=False):
+
     return "https://quickchart.io/chart?c=" + urllib.parse.quote(json.dumps({
         "type": "bar",
         "data": {
