@@ -309,7 +309,7 @@ def find_rep(dt, h, mi):
         reps = list(get_db().find({"timestamp": {"$gte": s, "$lt": e}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", 1))
         return min(reps, key=lambda r: abs(r["timestamp"] - ut)) if reps else None
     except: return None
-        def perf_alert(h=None, mi=None):
+       def perf_alert(h=None, mi=None):
     s = get_settings()
     tu = s.get("target_day_uday", 0)
     tm = s.get("target_day_mv", 0)
@@ -1525,7 +1525,7 @@ def cb(call):
             bot.send_message(call.message.chat.id, "Error: " + str(e))
         except:
             pass
-            @app.route('/', methods=['POST'])
+          @app.route('/', methods=['POST'])
 def webhook():
     try:
         u = telebot.types.Update.de_json(request.stream.read().decode('utf-8'))
@@ -1540,4 +1540,4 @@ def index():
 
 @app.route('/test', methods=['GET'])
 def test():
-    return "Token: " + ("SET" if BOT_TOKEN else "MISSING") + ", Groq: " + ("SET" if GROQ_KEY else "MISSING") + ", DB: " + ("SET" if MONGO_URL else "MISSING")
+    return "Token: " + ("SET" if BOT_TOKEN else "MISSING") + ", Groq: " + ("SET" if GROQ_KEY else "MISSING") + ", DB: " + ("SET" if MONGO_URL else "MISSING")  
