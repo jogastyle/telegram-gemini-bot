@@ -148,15 +148,9 @@ def pie_chart(days=7, is_mtd=False):
             "labels": ["Uday Comm Agr", "Maa Vaishno Telecom"],
             "datasets": [{"data": [80, 105], "backgroundColor": ["#36A2EB", "#FF6384"]}]
         }
-    }))
-   def bal_alert(p, th):
-    lines = []
-    for it in p.get("items", []):
-        if it.get("days", 999) < th:
-            name = MSISDN_MAP.get(it["msisdn"], it["msisdn"])
-            lines.append(f"⚠️ {name}: Stock Days {it['days']:.1f} din (< {th}) | Bal: {it['bal']:.2f}")
-    return "\n".join(lines) if lines else None
+    })}))
 
+def bal_alert(p, th): return None
 
 def stock_chk(th=3):
     lt = list(get_db().find({"type": "balance"}).sort("timestamp", -1).limit(1))
