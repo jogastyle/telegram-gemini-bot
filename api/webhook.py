@@ -4,8 +4,6 @@ from groq import Groq
 from pymongo import MongoClient
 from flask import Flask, request
 
-app = Flask(__name__)
-
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 GROQ_KEY = os.environ.get("GROQ_KEY")
 MONGO_URL = os.environ.get("MONGO_URL")
@@ -25,16 +23,8 @@ PERMS = {
     "peak_hours": (True, False), "distributors": (True, True),
 }
 
-try:
-    bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
-except Exception:
-    bot = None
-
-try:
-    client = Groq(api_key=GROQ_KEY) if GROQ_KEY else None
-except Exception:
-    client = None
-
+bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
+client = Groq(api_key=GROQ_KEY)
 _db = None
 
 def get_db():
@@ -85,10 +75,14 @@ def check_perm(key, adm):
 
 MSISDN_MAP = {"9997389467": "Uday Comm Agr", "7895110381": "Maa Vaishno Telecom"}
 
+app = Flask(__name__)
+
 DIST_P = re.compile(r'Dist\s+([A-Za-z0-9 &\.\-\']+?)\s*-\s*\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)\s*/\s*\((\d+)\)')
 TOT_P = re.compile(r'^Total\s*-\s*\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)\s*/\s*\((\d+)\)', re.M)
 TIME_P = re.compile(r'till\s+(\d{1,2})[:\.](\d{2})')
 BAL_P = re.compile(r'(\d{10})\s*/\s*(\d+)\s*/\s*(\d+)\s*/\s*([\d\.]+)')
+
+
 def parse_mnp(t):
     if not t or ("FTA MNP" not in t and "FTD" not in t):
         return None
@@ -167,7 +161,9 @@ def daily_data(days=7):
         dtw["Uday Comm Agr"] = dtw.get("Uday Comm Agr", 0) + u
         dtw["Maa Vaishno Telecom"] = dtw.get("Maa Vaishno Telecom", 0) + m
     return {"labels": labels, "uday": uday, "mv": mv, "total": tot, "dist_totals": dtw}
-    def qc(config, w=800, h=400):
+
+
+def qc(config, w=800, h=400):
     e = urllib.parse.quote(json.dumps(config))
     return f"https://quickchart.io/chart?c={e}&w={w}&h={h}&bkg=white&plugins=chartjs-plugin-datalabels"
 
@@ -231,7 +227,8 @@ def weekly_sum():
         lines.append(f"🏆 Best day: {b[0]} ({b[1]})")
         lines.append(f"📉 Lowest: {w[0]} ({w[1]})")
     return "\n".join(lines)
-    def monthly_sum():
+
+def monthly_sum():
     now = datetime.now()
     today = now.date()
     ms = today.replace(day=1)
@@ -392,7 +389,8 @@ def stock_chk(th=3):
         n = MSISDN_MAP.get(it["msisdn"], it["msisdn"])
         lines.append(f"🔹 {n}: {it['stock_days']} din")
     return "\n".join(lines)
-    def hist_avg(days=30):
+
+def hist_avg(days=30):
     now = datetime.now()
     ed = now.date() - timedelta(days=1)
     sd = ed - timedelta(days=days-1)
@@ -635,7 +633,8 @@ def day_ach():
             lines.append("")
             lines.append(f"📌 Overall: {t}/{tt} ({pct}%) — {mark}")
     return "\n".join(lines)
-    def peak_hours(days=7):
+
+def peak_hours(days=7):
     now = datetime.now()
     s = now - timedelta(days=days-1)
     us = s.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() - IST
@@ -828,7 +827,8 @@ def dist_cmp(days=7, today_only=False):
     w = "🔵 Uday Comm Agr" if ut > mt else ("🔴 Maa Vaishno Telecom" if mt > ut else "Tie")
     hdr = "⚖️ Distributor Comparison (AAJ)" if today_only else f"⚖️ Distributor Comparison (last {days} days)"
     return "\n".join([hdr, "", f"🔵 Uday Comm Agr: {ut} ({up}%)", f"   Avg: {ua}/din | Best: {d['labels'][ubi]} ({max(d['uday'])})", "", f"🔴 Maa Vaishno: {mt} ({mp}%)", f"   Avg: {ma}/din | Best: {d['labels'][mbi]} ({max(d['mv'])})", "", f"🏆 Winner: {w}"])
-    @app.route('/check-performance', methods=['GET'])
+
+@app.route('/check-performance', methods=['GET'])
 def chk_perf():
     try:
         t = perf_alert()
@@ -1077,7 +1077,8 @@ def handle(message):
                 )
             bot.reply_to(message, "🤖 DTR Mainpuri Bot Menu\n\nKya dekhna chahte ho?", reply_markup=kb)
             return
-               whm = re.search(r'working\s*hours?\s*(\d{1,2})(?::(\d{2}))?\s*(?:se|to|-)\s*(\d{1,2})(?::(\d{2}))?', lo)
+
+    whm = re.search(r'working\s*hours?\s*(\d{1,2})(?::(\d{2}))?\s*(?:se|to|-)\s*(\d{1,2})(?::(\d{2}))?', lo)
     if whm and (is_tag or is_priv):
         if not check_perm("working_hours", adm):
             bot.reply_to(message, "❌ Sirf admins.")
@@ -1384,6 +1385,7 @@ except Exception as e:
         bot.reply_to(message, "Error: " + str(e))
     except:
         pass
+
 BTN_MAP = {
     "graph_bar": "graphs", "graph_pie": "graphs", "graph_line": "graphs",
     "graph_bar_mtd": "graphs", "graph_pie_mtd": "graphs", "graph_line_mtd": "graphs",
@@ -1550,6 +1552,3 @@ def index():
 @app.route('/test', methods=['GET'])
 def test():
     return "Token: " + ("SET" if BOT_TOKEN else "MISSING") + ", Groq: " + ("SET" if GROQ_KEY else "MISSING") + ", DB: " + ("SET" if MONGO_URL else "MISSING")
-
-application = app
-handler = app
