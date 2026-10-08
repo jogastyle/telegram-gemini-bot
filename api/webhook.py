@@ -4,6 +4,7 @@ from groq import Groq
 from pymongo import MongoClient
 from flask import Flask, request
 
+app = Flask(__name__)
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 GROQ_KEY = os.environ.get("GROQ_KEY")
 MONGO_URL = os.environ.get("MONGO_URL")
@@ -75,7 +76,6 @@ def check_perm(key, adm):
 
 MSISDN_MAP = {"9997389467": "Uday Comm Agr", "7895110381": "Maa Vaishno Telecom"}
 
-app = Flask(__name__)
 
 DIST_P = re.compile(r'Dist\s+([A-Za-z0-9 &\.\-\']+?)\s*-\s*\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)\s*/\s*\((\d+)\)')
 TOT_P = re.compile(r'^Total\s*-\s*\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)\s*/\s*\((\d+)\)', re.M)
@@ -1541,3 +1541,5 @@ def index():
 @app.route('/test', methods=['GET'])
 def test():
     return "Token: " + ("SET" if BOT_TOKEN else "MISSING") + ", Groq: " + ("SET" if GROQ_KEY else "MISSING") + ", DB: " + ("SET" if MONGO_URL else "MISSING")  
+application = app
+handler = app
