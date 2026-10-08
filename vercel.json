@@ -1,15 +1,14 @@
 {
-  "version": 2,
-  "builds": [
-    {
-      "src": "api/webhook.py",
-      "use": "@vercel/python"
+  "functions": {
+    "api/index.py": {
+      "runtime": "python3.11",
+      "maxDuration": 60
     }
-  ],
-  "routes": [
+  },
+  "rewrites": [
     {
-      "src": "/(.*)",
-      "dest": "api/webhook.py"
+      "source": "/(.*)",
+      "destination": "/api/index"
     }
   ]
 }
