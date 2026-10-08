@@ -1544,6 +1544,7 @@ def cb(call):
             pass
 
 @app.route('/', methods=['POST'])
+@app.route('/api/index', methods=['POST'])
 def webhook():
     try:
         u = telebot.types.Update.de_json(request.stream.read().decode('utf-8'))
