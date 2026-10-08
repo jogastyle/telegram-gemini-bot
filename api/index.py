@@ -157,6 +157,7 @@ def pie_chart(days=7, is_mtd=False):
             lines.append(f"⚠️ {name}: Stock Days {it['days']:.1f} din (< {th}) | Bal: {it['bal']:.2f}")
     return "\n".join(lines) if lines else None
 
+
 def stock_chk(th=3):
     lt = list(get_db().find({"type": "balance"}).sort("timestamp", -1).limit(1))
     if not lt: return "❌ Koi balance report nahi mili."
