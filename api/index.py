@@ -1544,6 +1544,7 @@ def cb(call):
             pass
 
 @app.route('/', methods=['POST'])
+@app.route('/api', methods=['POST'])
 @app.route('/api/index', methods=['POST'])
 def webhook():
     try:
