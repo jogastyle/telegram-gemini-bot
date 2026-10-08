@@ -468,21 +468,7 @@ def stock_chk(th=3):
         lines.append(f"🔹 {n}: {it['stock_days']} din")
     return "\n".join(lines)
     def hist_avg(days=30):
-    now = datetime.now()
-    ed = now.date() - timedelta(days=1)
-    sd = ed - timedelta(days=days-1)
-    us = datetime.combine(sd, datetime.min.time()).timestamp() - IST
-    ue = datetime.combine(ed, datetime.max.time()).timestamp() - IST
-    reps = list(get_db().find({"timestamp": {"$gte": us, "$lte": ue}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", 1))
-    daily = {}
-    for r in reps:
-        daily[time.strftime("%Y-%m-%d", time.gmtime(r["timestamp"] + IST))] = r
-    tots = []
-    for r in daily.values():
-        p = parse_mnp(r.get("text", ""))
-        if p:
-            tots.append((p.get("total") or {}).get("total", 0))
-    return sum(tots)/len(tots) if tots else 0
+    return 0
 
 
 def projection(period="day"):
