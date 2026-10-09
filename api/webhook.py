@@ -1423,6 +1423,7 @@ def cb(call):
             pass
 
 
+@app.route('/api/webhook', methods=['POST'])
 @app.route('/', methods=['POST'])
 def webhook():
     try:
