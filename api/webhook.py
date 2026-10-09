@@ -4,6 +4,9 @@ from groq import Groq
 from pymongo import MongoClient
 from flask import Flask, request
 
+app = Flask(__name__)
+handler = app
+
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 GROQ_KEY = os.environ.get("GROQ_KEY")
 MONGO_URL = os.environ.get("MONGO_URL")
@@ -23,8 +26,15 @@ PERMS = {
     "peak_hours": (True, False), "distributors": (True, True),
 }
 
-bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
-client = Groq(api_key=GROQ_KEY)
+try:
+    bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
+except Exception:
+    bot = None
+
+try:
+    client = Groq(api_key=GROQ_KEY) if GROQ_KEY else None
+except Exception:
+    client = None
 _db = None
 
 def get_db():
@@ -75,7 +85,6 @@ def check_perm(key, adm):
 
 MSISDN_MAP = {"9997389467": "Uday Comm Agr", "7895110381": "Maa Vaishno Telecom"}
 
-app = Flask(__name__)
 
 DIST_P = re.compile(r'Dist\s+([A-Za-z0-9 &\.\-\']+?)\s*-\s*\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)\s*/\s*\((\d+)\)')
 TOT_P = re.compile(r'^Total\s*-\s*\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)\s*/\s*\((\d+)\)', re.M)
