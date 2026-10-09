@@ -26,10 +26,8 @@ PERMS = {
     "peak_hours": (True, False), "distributors": (True, True),
 }
 
-try:
-    bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
-except Exception:
-    bot = None
+_bot_token = BOT_TOKEN if BOT_TOKEN else "0000000000:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+bot = telebot.TeleBot(_bot_token, threaded=False)
 
 try:
     client = Groq(api_key=GROQ_KEY) if GROQ_KEY else None
