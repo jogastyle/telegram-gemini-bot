@@ -4,9 +4,6 @@ from groq import Groq
 from pymongo import MongoClient
 from flask import Flask, request
 
-app = Flask(__name__)
-handler = app
-
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 GROQ_KEY = os.environ.get("GROQ_KEY")
 MONGO_URL = os.environ.get("MONGO_URL")
@@ -26,13 +23,8 @@ PERMS = {
     "peak_hours": (True, False), "distributors": (True, True),
 }
 
-_bot_token = BOT_TOKEN if BOT_TOKEN else "0000000000:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-bot = telebot.TeleBot(_bot_token, threaded=False)
-
-try:
-    client = Groq(api_key=GROQ_KEY) if GROQ_KEY else None
-except Exception:
-    client = None
+bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
+client = Groq(api_key=GROQ_KEY)
 _db = None
 
 def get_db():
@@ -83,6 +75,7 @@ def check_perm(key, adm):
 
 MSISDN_MAP = {"9997389467": "Uday Comm Agr", "7895110381": "Maa Vaishno Telecom"}
 
+app = Flask(__name__)
 
 DIST_P = re.compile(r'Dist\s+([A-Za-z0-9 &\.\-\']+?)\s*-\s*\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)\s*/\s*\((\d+)\)')
 TOT_P = re.compile(r'^Total\s*-\s*\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)\s*/\s*\((\d+)\)', re.M)
@@ -175,11 +168,12 @@ def qc(config, w=800, h=400):
 
 def bar_chart(days=7, mtd=False):
     d = daily_data(days)
+    title_txt = "Daily MNP - MTD" if mtd else f"Daily MNP - Last {days} Days"
     cfg = {"type": "bar", "data": {"labels": d["labels"], "datasets": [
         {"label": "Uday Comm Agr", "data": d["uday"], "backgroundColor": "#2196F3"},
         {"label": "Maa Vaishno Telecom", "data": d["mv"], "backgroundColor": "#F44336"},
         {"label": "Total", "data": d["total"], "backgroundColor": "#4CAF50"}]},
-       "options": {"title": {"display": True, "text": "Daily MNP - MTD" if mtd else f"Daily MNP - Last {days} Days", "fontSize": 16},
+        "options": {"title": {"display": True, "text": title_txt, "fontSize": 16},
         "legend": {"position": "bottom"},
         "plugins": {"datalabels": {"display": True, "color": "white", "anchor": "center", "align": "center",
         "font": {"size": 11, "weight": "bold"}, "formatter": "function(v){return v>0?v:'';}"}}}}
@@ -190,8 +184,9 @@ def pie_chart(days=7, mtd=False):
     dt = d["dist_totals"]
     labels = list(dt.keys()) if dt else ["No Data"]
     values = list(dt.values()) if dt else [1]
+    title_txt = "Distributor Share - MTD" if mtd else f"Distributor Share - Last {days} Days"
     cfg = {"type": "doughnut", "data": {"labels": labels, "datasets": [{"data": values, "backgroundColor": ["#2196F3", "#F44336", "#4CAF50"]}]},
-       "options": {"title": {"display": True, "text": "Distributor Share - MTD" if mtd else f"Distributor Share - Last {days} Days", "fontSize": 16},
+        "options": {"title": {"display": True, "text": title_txt, "fontSize": 16},
         "legend": {"position": "bottom"},
         "plugins": {"datalabels": {"display": True, "color": "white", "font": {"size": 12, "weight": "bold"},
         "formatter": "function(v,c){var s=c.dataset.data.reduce(function(a,b){return a+b;},0);var p=Math.round(v/s*100);return v+'\\n('+p+'%)';}"}}}}
@@ -199,6 +194,7 @@ def pie_chart(days=7, mtd=False):
 
 def line_chart(days=7, mtd=False):
     d = daily_data(days)
+    title_txt = "MNP Trend - MTD" if mtd else f"MNP Trend - Last {days} Days"
     cfg = {"type": "line", "data": {"labels": d["labels"], "datasets": [
         {"label": "Uday Comm Agr", "data": d["uday"], "borderColor": "#2196F3", "fill": False, "tension": 0.3,
          "datalabels": {"display": True, "align": "top", "anchor": "end", "offset": 6, "color": "#1565C0", "font": {"size": 10, "weight": "bold"}, "formatter": "function(v){return v>0?v:'';}"}},
@@ -206,7 +202,7 @@ def line_chart(days=7, mtd=False):
          "datalabels": {"display": True, "align": "bottom", "anchor": "end", "offset": 6, "color": "#B71C1C", "font": {"size": 10, "weight": "bold"}, "formatter": "function(v){return v>0?v:'';}"}},
         {"label": "Total", "data": d["total"], "borderColor": "#4CAF50", "fill": False, "tension": 0.3, "borderWidth": 3,
          "datalabels": {"display": True, "align": "top", "anchor": "end", "offset": 20, "color": "#1B5E20", "font": {"size": 11, "weight": "bold"}, "formatter": "function(v){return v>0?v:'';}"}}]},
-        "options": {"title": {"display": True, "text": "MNP Trend - MTD" if mtd else f"MNP Trend - Last {days} Days", "fontSize": 16},
+        "options": {"title": {"display": True, "text": title_txt, "fontSize": 16},
         "legend": {"position": "bottom"}, "layout": {"padding": {"top": 40}}}}
     return qc(cfg)
     
@@ -1031,10 +1027,10 @@ def handle(message):
                 InlineKeyboardButton("📊 Bar Graph", callback_data="graph_bar"),
                 InlineKeyboardButton("🥧 Pie Chart", callback_data="graph_pie"),
                 InlineKeyboardButton("📈 Line Chart", callback_data="graph_line"),
-                InlineKeyboardButton("📉 Aaj Projection", callback_data="proj_day"),
                 InlineKeyboardButton("📊 MTD Bar", callback_data="graph_bar_mtd"),
                 InlineKeyboardButton("🥧 MTD Pie", callback_data="graph_pie_mtd"),
                 InlineKeyboardButton("📈 MTD Line", callback_data="graph_line_mtd"),
+                InlineKeyboardButton("📉 Aaj Projection", callback_data="proj_day"),
                 InlineKeyboardButton("📊 Weekly Proj", callback_data="proj_week"),
                 InlineKeyboardButton("📅 Monthly Proj", callback_data="proj_month"),
                 InlineKeyboardButton("⚠️ Performance", callback_data="perf_check"),
@@ -1255,6 +1251,7 @@ def handle(message):
             wp = "pie" in lo or "share" in lo or "distribution" in lo
             wl = "line" in lo or "trend" in lo
             wa = any(w in lo for w in ["sabhi", "full", "teeno", "all", "sab", "sare"])
+            mtd = "mtd" in lo
             bot.send_message(message.chat.id, "⏳ Graph ban raha hai...")
             if wa:
                 ts = ["bar", "pie", "line"]
@@ -1273,11 +1270,11 @@ def handle(message):
             for t in ts:
                 try:
                     if t == "bar":
-                        u = bar_chart(dy)
+                        u = bar_chart(31 if mtd else dy, mtd=mtd)
                     elif t == "pie":
-                        u = pie_chart(dy)
+                        u = pie_chart(31 if mtd else dy, mtd=mtd)
                     else:
-                        u = line_chart(dy)
+                        u = line_chart(31 if mtd else dy, mtd=mtd)
                     bot.send_photo(message.chat.id, u)
                     time.sleep(1)
                 except Exception as ge:
@@ -1384,12 +1381,12 @@ def cb(call):
             bot.send_photo(cid, pie_chart(7))
         elif d == "graph_line":
             bot.send_photo(cid, line_chart(7))
-         elif d == "graph_bar_mtd":
+        elif d == "graph_bar_mtd":
             bot.send_photo(cid, bar_chart(31, mtd=True))
-          elif d == "graph_pie_mtd":
+        elif d == "graph_pie_mtd":
             bot.send_photo(cid, pie_chart(31, mtd=True))
-          elif d == "graph_line_mtd":
-           bot.send_photo(cid, line_chart(31, mtd=True))
+        elif d == "graph_line_mtd":
+            bot.send_photo(cid, line_chart(31, mtd=True))
         elif d == "proj_day":
             bot.send_message(cid, projection("day"))
         elif d == "proj_week":
@@ -1423,8 +1420,8 @@ def cb(call):
             pass
 
 
-@app.route('/api/webhook', methods=['POST'])
 @app.route('/', methods=['POST'])
+@app.route('/api/webhook', methods=['POST'])
 def webhook():
     try:
         u = telebot.types.Update.de_json(request.stream.read().decode('utf-8'))
