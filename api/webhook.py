@@ -1,5 +1,4 @@
-import os, re, time, json, telebot, urllib.parse
-import calendar
+import os, re, time, json, telebot, urllib.parse, calendar
 from datetime import datetime, timedelta
 from groq import Groq
 from pymongo import MongoClient
@@ -280,6 +279,25 @@ def best_worst(days=30):
     ]
     return "\n".join(lines)
 
+def parse_range(lo):
+    m = re.search(r'(\d{1,2})\s*([a-z]+)\s*(?:se|to|-)\s*(\d{1,2})\s*([a-z]+)', lo)
+    if not m:
+        return None, None
+    d1, m1, d2, m2 = int(m.group(1)), m.group(2)[:3], int(m.group(3)), m.group(4)[:3]
+    if m1 not in MON or m2 not in MON:
+        return None, None
+    yr = datetime.now().year
+    try:
+        sd = datetime(yr, MON[m1], d1).date()
+        ed = datetime(yr, MON[m2], d2).date()
+        if ed > datetime.now().date():
+            yr -= 1
+            sd = datetime(yr, MON[m1], d1).date()
+            ed = datetime(yr, MON[m2], d2).date()
+        return sd, ed
+    except:
+        return None, None
+
 def qc(config, w=800, h=400):
     e = urllib.parse.quote(json.dumps(config))
     return f"https://quickchart.io/chart?c={e}&w={w}&h={h}&bkg=white&plugins=chartjs-plugin-datalabels"
@@ -344,7 +362,7 @@ def dist_chart(dist, ctype="bar", days=7, mtd=False):
              "datalabels": {"display": True, "align": "top", "anchor": "end", "offset": 6, "color": color, "font": {"size": 11, "weight": "bold"}, "formatter": "function(v){return v>0?v:'';}"}}]},
             "options": {"title": {"display": True, "text": title_txt, "fontSize": 16},
             "legend": {"display": False}, "layout": {"padding": {"top": 40}}}}
-    else:  # pie
+    else:
         tot = sum(vals)
         cfg = {"type": "doughnut", "data": {"labels": [n], "datasets": [{"data": [tot], "backgroundColor": [color]}]},
             "options": {"title": {"display": True, "text": title_txt + f" (Total: {tot})", "fontSize": 16},
@@ -352,7 +370,6 @@ def dist_chart(dist, ctype="bar", days=7, mtd=False):
             "plugins": {"datalabels": {"display": True, "color": "white", "font": {"size": 14, "weight": "bold"},
             "formatter": "function(v){return v;}"}}}}
     return qc(cfg)
-
 
 def weekly_sum():
     d = daily_data(7)
@@ -451,25 +468,6 @@ def ext_date(t):
             return c
         except: pass
     return None
-
-def parse_range(lo):
-    m = re.search(r'(\d{1,2})\s*([a-z]+)\s*(?:se|to|-)\s*(\d{1,2})\s*([a-z]+)', lo)
-    if not m:
-        return None, None
-    d1, m1, d2, m2 = int(m.group(1)), m.group(2)[:3], int(m.group(3)), m.group(4)[:3]
-    if m1 not in MON or m2 not in MON:
-        return None, None
-    yr = datetime.now().year
-    try:
-        sd = datetime(yr, MON[m1], d1).date()
-        ed = datetime(yr, MON[m2], d2).date()
-        if ed > datetime.now().date():
-            yr -= 1
-            sd = datetime(yr, MON[m1], d1).date()
-            ed = datetime(yr, MON[m2], d2).date()
-        return sd, ed
-    except:
-        return None, None
 
 def find_rep(dt, h, mi):
     try:
@@ -928,6 +926,7 @@ def dist_cmp(days=7, today_only=False):
     hdr = "⚖️ Distributor Comparison (AAJ)" if today_only else f"⚖️ Distributor Comparison (last {days} days)"
     return "\n".join([hdr, "", f"🔵 Uday Comm Agr: {ut} ({up}%)", f"   Avg: {ua}/din | Best: {d['labels'][ubi]} ({max(d['uday'])})", "", f"🔴 Maa Vaishno: {mt} ({mp}%)", f"   Avg: {ma}/din | Best: {d['labels'][mbi]} ({max(d['mv'])})", "", f"🏆 Winner: {w}"])
 
+
 # ==================== SR ENDPOINTS ====================
 @app.route('/sr-10am', methods=['GET'])
 def sr_10am():
@@ -1095,7 +1094,7 @@ def report_missing():
         return "Alert sent", 200
     except Exception as e:
         return "Error: " + str(e), 500
-        
+
 
 @bot.message_handler(func=lambda m: True)
 def handle(message):
@@ -1156,7 +1155,6 @@ def handle(message):
                 bot.reply_to(message, f"❌ Error: {str(ee)}")
             return
 
-        # DELETE LAST COMMAND
         if lo.strip() in ["delete last", "last delete", "undo"]:
             if not adm:
                 bot.reply_to(message, "❌ Sirf admin.")
@@ -1175,7 +1173,6 @@ def handle(message):
             bot.reply_to(message, f"{r}\n\nUsername: @{un or 'not set'}\nUser ID: {uid}")
             return
 
-        # ===== ORGANIZED MENU =====
         if lo.strip() in ["/start", "/menu", "menu", "start", "help", "commands"]:
             if not check_perm("menu", adm):
                 bot.reply_to(message, "❌ Menu currently disabled hai.")
@@ -1189,8 +1186,6 @@ def handle(message):
                 InlineKeyboardButton("🚨 Stock Check", callback_data="stock_check"),
                 InlineKeyboardButton("⚖️ Distributors", callback_data="dist_compare"),
                 InlineKeyboardButton("📋 Weekly Summary", callback_data="weekly_summary"),
-            )
-            kb.add(
                 InlineKeyboardButton("📅 Month vs Month", callback_data="mom_compare"),
                 InlineKeyboardButton("🏆 Best/Worst", callback_data="best_worst"),
                 InlineKeyboardButton("📊 Distributor Charts", callback_data="menu_dist"),
@@ -1201,6 +1196,27 @@ def handle(message):
                     InlineKeyboardButton("🎯 Target Status", callback_data="tgt_status"),
                 )
             bot.reply_to(message, "🤖 DTR Mainpuri Bot Menu\n\nKya dekhna chahte ho?", reply_markup=kb)
+            return
+
+
+        # ===== DISTRIBUTOR-SPECIFIC CHARTS =====
+        dcm = re.search(r'\b(uday|mv|vaishno|maa\s*vaishno)\b.*\b(bar|line|pie)\b', lo)
+        if dcm and ("chart" in lo or "graph" in lo or dcm.start() == 0 or lo.strip().startswith(dcm.group(1))):
+            if not check_perm("graphs", adm):
+                bot.reply_to(message, "❌ Currently disabled.")
+                return
+            dist = "uday" if "uday" in dcm.group(1) else "mv"
+            ctype = dcm.group(2)
+            mtd = "mtd" in lo
+            dy = 7
+            d = re.search(r'(\d{1,2})\s*(?:din|days)', lo)
+            if d:
+                dy = int(d.group(1))
+            bot.send_message(message.chat.id, "⏳ Chart ban raha hai...")
+            try:
+                bot.send_photo(message.chat.id, dist_chart(dist, ctype, dy, mtd=mtd))
+            except Exception as ge:
+                bot.send_message(message.chat.id, f"Chart error: {str(ge)}")
             return
 
         # ===== CUSTOM DATE RANGE =====
@@ -1439,25 +1455,6 @@ def handle(message):
             return
 
         # ===== GRAPHS =====
-                # ===== DISTRIBUTOR-SPECIFIC CHARTS =====
-        dcm = re.search(r'\b(uday|mv|vaishno|maa\s*vaishno)\b.*\b(bar|line|pie)\b', lo)
-        if dcm and ("chart" in lo or "graph" in lo or dcm.start() == 0 or lo.strip().startswith(dcm.group(1))):
-            if not check_perm("graphs", adm):
-                bot.reply_to(message, "❌ Currently disabled.")
-                return
-            dist = "uday" if "uday" in dcm.group(1) else "mv"
-            ctype = dcm.group(2)
-            mtd = "mtd" in lo
-            dy = 7
-            d = re.search(r'(\d{1,2})\s*(?:din|days)', lo)
-            if d:
-                dy = int(d.group(1))
-            bot.send_message(message.chat.id, "⏳ Chart ban raha hai...")
-            try:
-                bot.send_photo(message.chat.id, dist_chart(dist, ctype, dy, mtd=mtd))
-            except Exception as ge:
-                bot.send_message(message.chat.id, f"Chart error: {str(ge)}")
-            return
         if any(w in lo for w in ["graph", "chart"]):
             if not check_perm("graphs", adm):
                 bot.reply_to(message, "❌ Currently disabled.")
@@ -1574,6 +1571,7 @@ def handle(message):
             pass
 
 
+
 BTN_MAP = {
     "graph_bar": "graphs", "graph_pie": "graphs", "graph_line": "graphs",
     "graph_bar_mtd": "graphs", "graph_pie_mtd": "graphs", "graph_line_mtd": "graphs",
@@ -1585,18 +1583,41 @@ BTN_MAP = {
 }
 
 
+def build_main_menu_kb(adm):
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("📊 Graphs", callback_data="menu_graphs"),
+        InlineKeyboardButton("📈 Projection", callback_data="menu_proj"),
+        InlineKeyboardButton("🎯 Performance", callback_data="menu_perf"),
+        InlineKeyboardButton("🚨 Stock Check", callback_data="stock_check"),
+        InlineKeyboardButton("⚖️ Distributors", callback_data="dist_compare"),
+        InlineKeyboardButton("📋 Weekly Summary", callback_data="weekly_summary"),
+        InlineKeyboardButton("📅 Month vs Month", callback_data="mom_compare"),
+        InlineKeyboardButton("🏆 Best/Worst", callback_data="best_worst"),
+        InlineKeyboardButton("📊 Distributor Charts", callback_data="menu_dist"),
+    )
+    if adm:
+        kb.add(
+            InlineKeyboardButton("🏆 Peak Hours", callback_data="peak_hours"),
+            InlineKeyboardButton("🎯 Target Status", callback_data="tgt_status"),
+        )
+    return kb
+
+
 @bot.callback_query_handler(func=lambda c: True)
 def cb(call):
     try:
         bot.answer_callback_query(call.id)
         cid = call.message.chat.id
+        mid = call.message.message_id
         d = call.data
         uid = call.from_user.id
         un = call.from_user.username
         adm = is_admin(uid, un)
         from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-        # ===== SUBMENU: GRAPHS =====
+        # ===== SUBMENU: GRAPHS (same message edit) =====
         if d == "menu_graphs":
             kb = InlineKeyboardMarkup(row_width=3)
             kb.add(
@@ -1610,10 +1631,13 @@ def cb(call):
                 InlineKeyboardButton("🥧 MTD Pie", callback_data="graph_pie_mtd"),
             )
             kb.add(InlineKeyboardButton("🔙 Back to Menu", callback_data="menu_main"))
-            bot.send_message(cid, "📊 Graphs Menu\n\nKaunsa graph chahiye?", reply_markup=kb)
+            try:
+                bot.edit_message_text("📊 Graphs Menu\n\nKaunsa graph chahiye?", cid, mid, reply_markup=kb)
+            except:
+                bot.send_message(cid, "📊 Graphs Menu\n\nKaunsa graph chahiye?", reply_markup=kb)
             return
 
-        # ===== SUBMENU: PROJECTION =====
+        # ===== SUBMENU: PROJECTION (same message edit) =====
         if d == "menu_proj":
             if not check_perm("projections", adm):
                 bot.send_message(cid, "❌ Currently disabled hai.")
@@ -1625,10 +1649,13 @@ def cb(call):
                 InlineKeyboardButton("📅 MTD Projection (Month)", callback_data="proj_month"),
                 InlineKeyboardButton("🔙 Back to Menu", callback_data="menu_main"),
             )
-            bot.send_message(cid, "📈 Projection Menu", reply_markup=kb)
+            try:
+                bot.edit_message_text("📈 Projection Menu", cid, mid, reply_markup=kb)
+            except:
+                bot.send_message(cid, "📈 Projection Menu", reply_markup=kb)
             return
 
-        # ===== SUBMENU: PERFORMANCE =====
+        # ===== SUBMENU: PERFORMANCE (same message edit) =====
         if d == "menu_perf":
             if not check_perm("performance", adm):
                 bot.send_message(cid, "❌ Currently disabled hai.")
@@ -1640,9 +1667,13 @@ def cb(call):
                 InlineKeyboardButton("📅 MTD Achievement (Month)", callback_data="perf_month"),
                 InlineKeyboardButton("🔙 Back to Menu", callback_data="menu_main"),
             )
-            bot.send_message(cid, "🎯 Performance Menu", reply_markup=kb)
+            try:
+                bot.edit_message_text("🎯 Performance Menu", cid, mid, reply_markup=kb)
+            except:
+                bot.send_message(cid, "🎯 Performance Menu", reply_markup=kb)
             return
-        # ===== SUBMENU: DISTRIBUTOR CHARTS =====
+
+        # ===== SUBMENU: DISTRIBUTOR CHARTS (same message edit) =====
         if d == "menu_dist":
             kb = InlineKeyboardMarkup(row_width=3)
             kb.add(InlineKeyboardButton("🔵 UDAY COMM AGR", callback_data="noop"))
@@ -1668,39 +1699,41 @@ def cb(call):
                 InlineKeyboardButton("🥧 MTD Pie", callback_data="dist_mv_mtd_pie"),
             )
             kb.add(InlineKeyboardButton("🔙 Back to Menu", callback_data="menu_main"))
-            bot.send_message(cid, "📊 Distributor Charts\n\nKis distributor ka chart chahiye?", reply_markup=kb)
+            try:
+                bot.edit_message_text("📊 Distributor Charts\n\nKis distributor ka chart chahiye?", cid, mid, reply_markup=kb)
+            except:
+                bot.send_message(cid, "📊 Distributor Charts\n\nKis distributor ka chart chahiye?", reply_markup=kb)
             return
 
         if d == "noop":
             return
-        # ===== BACK TO MAIN MENU =====
+
+        # ===== BACK TO MAIN MENU (same message edit) =====
         if d == "menu_main":
-            kb = InlineKeyboardMarkup(row_width=2)
-            kb.add(
-                InlineKeyboardButton("📊 Graphs", callback_data="menu_graphs"),
-                InlineKeyboardButton("📈 Projection", callback_data="menu_proj"),
-                InlineKeyboardButton("🎯 Performance", callback_data="menu_perf"),
-                InlineKeyboardButton("🚨 Stock Check", callback_data="stock_check"),
-                InlineKeyboardButton("⚖️ Distributors", callback_data="dist_compare"),
-                InlineKeyboardButton("📋 Weekly Summary", callback_data="weekly_summary"),
-            )
-            kb.add(
-                InlineKeyboardButton("📅 Month vs Month", callback_data="mom_compare"),
-                InlineKeyboardButton("🏆 Best/Worst", callback_data="best_worst"),
-                InlineKeyboardButton("📊 Distributor Charts", callback_data="menu_dist"),
-            )
-            if adm:
-                kb.add(
-                    InlineKeyboardButton("🏆 Peak Hours", callback_data="peak_hours"),
-                    InlineKeyboardButton("🎯 Target Status", callback_data="tgt_status"),
-                )
-            bot.send_message(cid, "🤖 Main Menu", reply_markup=kb)
+            kb = build_main_menu_kb(adm)
+            try:
+                bot.edit_message_text("🤖 Main Menu\n\nKya dekhna chahte ho?", cid, mid, reply_markup=kb)
+            except:
+                bot.send_message(cid, "🤖 Main Menu\n\nKya dekhna chahte ho?", reply_markup=kb)
             return
 
         # ===== Permission check =====
         pk = BTN_MAP.get(d)
         if pk and not check_perm(pk, adm):
             bot.send_message(cid, "❌ Ye feature currently disabled hai.")
+            return
+
+        # ===== DISTRIBUTOR CHARTS =====
+        if d and d.startswith("dist_") and d != "dist_compare":
+            parts = d.replace("dist_", "").split("_")
+            dist = parts[0]
+            mtd = False
+            if len(parts) > 2 and parts[1] == "mtd":
+                ctype = parts[2]
+                mtd = True
+            else:
+                ctype = parts[1]
+            bot.send_photo(cid, dist_chart(dist, ctype, 7, mtd=mtd))
             return
 
         # ===== GRAPHS =====
@@ -1735,7 +1768,7 @@ def cb(call):
         elif d == "perf_check":
             bot.send_message(cid, perf_alert())
 
-        # ===== NEW: MOM, BEST/WORST =====
+        # ===== MOM, BEST/WORST =====
         elif d == "mom_compare":
             bot.send_message(cid, mom_compare())
         elif d == "best_worst":
@@ -1758,16 +1791,6 @@ def cb(call):
                 pass
         elif d == "peak_hours":
             bot.send_message(cid, peak_hours(7))
-                    elif d and d.startswith("dist_"):
-            parts = d.replace("dist_", "").split("_")
-            dist = parts[0]
-            mtd = False
-            if len(parts) > 2 and parts[1] == "mtd":
-                ctype = parts[2]
-                mtd = True
-            else:
-                ctype = parts[1]
-            bot.send_photo(cid, dist_chart(dist, ctype, 7, mtd=mtd))
         elif d == "dist_compare":
             bot.send_message(cid, dist_cmp(7))
     except Exception as e:
@@ -1796,3 +1819,7 @@ def index():
 @app.route('/test', methods=['GET'])
 def test():
     return "Token: " + ("SET" if BOT_TOKEN else "MISSING") + ", Groq: " + ("SET" if GROQ_KEY else "MISSING") + ", DB: " + ("SET" if MONGO_URL else "MISSING")
+
+
+application = app
+handler = app
