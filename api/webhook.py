@@ -1393,7 +1393,7 @@ def handle(message):
             return
 
         # ===== PEAK HOURS =====
-               if any(w in lo for w in ["peak hour", "peak hours", "peak time", "kis time sabse zyada"]):
+              if any(w in lo for w in ["peak hour", "peak hours", "peak time", "kis time sabse zyada"]):
             if not check_perm("peak_hours", adm):
                 bot.reply_to(message, "❌ Currently disabled.")
                 return
