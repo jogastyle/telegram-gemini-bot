@@ -16,7 +16,7 @@ ADMIN_USER_IDS = []
 
 PERMS = {
     "graphs": (True, True), "projections": (True, True), "performance": (True, True),
-    "weekly_summary": (True, False), "compare": (True, False), "custom_report": (True, True),
+    "weekly_summary": (True, True), "compare": (True, False), "custom_report": (True, True),
     "menu": (True, True), "target_set": (True, False),
     "working_hours": (True, False), "stock_threshold": (True, False),
     "stock_check": (True, True), "target_status": (True, False),
@@ -132,11 +132,16 @@ def cmp_text(r1, r2, l1="Pehle", l2="Ab"):
     lines.append("")
     lines.append(f"Total: {a} -> {b} ({'+' if diff>=0 else ''}{diff})")
     return "\n".join(lines)
-    
 
-def daily_data(days=7):
+
+def daily_data(days=7, mtd=False):
     now = datetime.now()
-    start = now - timedelta(days=days-1)
+    if mtd:
+        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        days_count = now.day
+    else:
+        start = now - timedelta(days=days-1)
+        days_count = days
     utc0 = start.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() - IST
     reps = list(get_db().find({"timestamp": {"$gte": utc0}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", 1))
     last = {}
@@ -144,7 +149,7 @@ def daily_data(days=7):
         last[time.strftime("%Y-%m-%d", time.gmtime(r["timestamp"] + IST))] = r
     labels, uday, mv, tot = [], [], [], []
     dtw = {}
-    for i in range(days-1, -1, -1):
+    for i in range(days_count-1, -1, -1):
         d = now - timedelta(days=i)
         k = d.strftime("%Y-%m-%d")
         labels.append(d.strftime("%d %b"))
@@ -167,7 +172,7 @@ def qc(config, w=800, h=400):
     return f"https://quickchart.io/chart?c={e}&w={w}&h={h}&bkg=white&plugins=chartjs-plugin-datalabels"
 
 def bar_chart(days=7, mtd=False):
-    d = daily_data(days)
+    d = daily_data(days, mtd=mtd)
     title_txt = "Daily MNP - MTD" if mtd else f"Daily MNP - Last {days} Days"
     cfg = {"type": "bar", "data": {"labels": d["labels"], "datasets": [
         {"label": "Uday Comm Agr", "data": d["uday"], "backgroundColor": "#2196F3"},
@@ -180,7 +185,7 @@ def bar_chart(days=7, mtd=False):
     return qc(cfg)
 
 def pie_chart(days=7, mtd=False):
-    d = daily_data(days)
+    d = daily_data(days, mtd=mtd)
     dt = d["dist_totals"]
     labels = list(dt.keys()) if dt else ["No Data"]
     values = list(dt.values()) if dt else [1]
@@ -193,7 +198,7 @@ def pie_chart(days=7, mtd=False):
     return qc(cfg)
 
 def line_chart(days=7, mtd=False):
-    d = daily_data(days)
+    d = daily_data(days, mtd=mtd)
     title_txt = "MNP Trend - MTD" if mtd else f"MNP Trend - Last {days} Days"
     cfg = {"type": "line", "data": {"labels": d["labels"], "datasets": [
         {"label": "Uday Comm Agr", "data": d["uday"], "borderColor": "#2196F3", "fill": False, "tension": 0.3,
@@ -205,7 +210,7 @@ def line_chart(days=7, mtd=False):
         "options": {"title": {"display": True, "text": title_txt, "fontSize": 16},
         "legend": {"position": "bottom"}, "layout": {"padding": {"top": 40}}}}
     return qc(cfg)
-    
+
 
 def weekly_sum():
     d = daily_data(7)
@@ -267,7 +272,6 @@ def monthly_sum():
         lines.append(f"🏆 Best day: {b[0]} ({b[1]})")
         lines.append(f"📉 Lowest: {w[0]} ({w[1]})")
     return "\n".join(lines)
-    
 
 MON = {"jan":1,"feb":2,"mar":3,"apr":4,"may":5,"jun":6,"jul":7,"aug":8,"sep":9,"oct":10,"nov":11,"dec":12}
 
@@ -358,7 +362,7 @@ def perf_alert(h=None, mi=None):
         if tm and m >= tm: msg += "\n✅ Maa Vaishno Telecom ne target pura kar liya!"
         return msg
     return f"✅ Sab targets pura ho gaye ({lbl})\n\n🔵 Uday Comm Agr: {u}/{tu}\n🔴 Maa Vaishno Telecom: {m}/{tm}"
-    
+
 
 def bal_alert(p, th=3):
     if not p: return None
@@ -407,7 +411,7 @@ def hist_avg(days=30):
         p = parse_mnp(r.get("text", ""))
         if p: tots.append((p.get("total") or {}).get("total", 0))
     return sum(tots)/len(tots) if tots else 0
-    
+
 
 def projection(period="day"):
     ws, we = get_wh()
@@ -429,11 +433,11 @@ def projection(period="day"):
         el = max(0.5, ch - sh)
         rem = max(0, we - ch)
         if rem <= 0:
-            return f"📈 Aaj ka final (working hours khatam)\n\n🔵 Uday: {u}\n🔴 Maa Vaishno: {m}\n🎯 Total: {t}"
+            return f"📈 FTD Projection (Aaj ka final - working hours khatam)\n\n🔵 Uday: {u}\n🔴 Maa Vaishno: {m}\n🎯 Total: {t}"
         pu = int(u/el*(el+rem))
         pm = int(m/el*(el+rem))
         pt = int(t/el*(el+rem))
-        return f"📈 Aaj ki Projection\n\nAbhi tak ({last.strftime('%H:%M')}):\n🔵 Uday: {u}\n🔴 Maa Vaishno: {m}\n🎯 Total: {t}\n\nExpected ({int(we)}:00 tak):\n🔵 Uday: ~{pu}\n🔴 Maa Vaishno: ~{pm}\n🎯 Total: ~{pt}"
+        return f"📈 FTD Projection\n\nAbhi tak ({last.strftime('%H:%M')}):\n🔵 Uday: {u}\n🔴 Maa Vaishno: {m}\n🎯 Total: {t}\n\nExpected ({int(we)}:00 tak):\n🔵 Uday: ~{pu}\n🔴 Maa Vaishno: ~{pm}\n🎯 Total: ~{pt}"
     return "❌ Period samjha nahi."
 
 def proj_week():
@@ -510,7 +514,7 @@ def proj_month():
     u_exp = int(u_sofar + u_avg * rd)
     m_exp = int(m_sofar + m_avg * rd)
     t_exp = u_exp + m_exp
-    lines = [f"📅 Monthly Projection ({ms.strftime('%b %Y')})", "", f"Abhi tak ({dd} din):", f"🔵 Uday: {u_sofar}", f"🔴 Maa Vaishno: {m_sofar}", f"🎯 Total: {t_sofar}", "", "📊 Daily Avg:", f"🔵 Uday: {u_avg}/din", f"🔴 Maa Vaishno: {m_avg}/din", "", f"📈 Expected ({rd} din baaki count):", f"🔵 Uday: ~{u_exp}", f"🔴 Maa Vaishno: ~{m_exp}", f"🎯 Total: ~{t_exp}"]
+    lines = [f"📅 MTD Projection ({ms.strftime('%b %Y')})", "", f"Abhi tak ({dd} din):", f"🔵 Uday: {u_sofar}", f"🔴 Maa Vaishno: {m_sofar}", f"🎯 Total: {t_sofar}", "", "📊 Daily Avg:", f"🔵 Uday: {u_avg}/din", f"🔴 Maa Vaishno: {m_avg}/din", "", f"📈 Expected ({rd} din baaki count):", f"🔵 Uday: ~{u_exp}", f"🔴 Maa Vaishno: ~{m_exp}", f"🎯 Total: ~{t_exp}"]
     mt_u = get_target("uday", "month")
     mt_m = get_target("mv", "month")
     if mt_u or mt_m:
@@ -589,7 +593,7 @@ def proj_till(dy, mon_num):
             mark = f"❌ gap {-diff}" if diff < 0 else f"✅ +{diff}"
             lines.append(f"🔴 Maa Vaishno: {m_exp}/{mt_m} ({pct}%) — {mark}")
     return "\n".join(lines)
-    
+
 
 def peak_hours(days=7):
     now = datetime.now()
@@ -663,6 +667,53 @@ def growth(period="week"):
         return f"{arrow} Growth Rate (Month)\n\nThis month ({today.day} din): {tt}\nLast month (same days): {lt}\nGrowth: {'+' if g>=0 else ''}{g}%"
     return "❌ Period samjha nahi."
 
+def day_ach():
+    now = datetime.now()
+    today = now.date()
+    utc0 = datetime.combine(today, datetime.min.time()).timestamp() - IST
+    reps = list(get_db().find({"timestamp": {"$gte": utc0}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", -1).limit(1))
+    if not reps:
+        return "❌ Aaj koi report nahi aayi."
+    p = reps[0].get("parsed") or parse_mnp(reps[0].get("text", ""))
+    if not p:
+        return "❌ Report parse nahi ho paayi."
+    u = p["distributors"].get("Uday Comm Agr", {}).get("total", 0)
+    m = p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
+    t = u + m
+    lines = ["📊 FTD Achievement", ""]
+    lines.append(f"Latest: {reps[0].get('date_str', '')}")
+    lines.append("")
+    lines.append(f"🔵 Uday: {u}")
+    lines.append(f"🔴 Maa Vaishno: {m}")
+    lines.append(f"🎯 Total: {t}")
+    tu = get_target("uday", "day")
+    tm = get_target("mv", "day")
+    if tu or tm:
+        lines.append("")
+        lines.append("🎯 Daily Target:")
+        if tu: lines.append(f"🔵 Uday: {tu}")
+        if tm: lines.append(f"🔴 Maa Vaishno: {tm}")
+        lines.append("")
+        lines.append("⚖️ Target vs Achievement:")
+        if tu:
+            pct = int(u / tu * 100) if tu else 0
+            diff = u - tu
+            mark = f"❌ gap {-diff}" if diff < 0 else f"✅ +{diff}"
+            lines.append(f"🔵 Uday: {u}/{tu} ({pct}%) — {mark}")
+        if tm:
+            pct = int(m / tm * 100) if tm else 0
+            diff = m - tm
+            mark = f"❌ gap {-diff}" if diff < 0 else f"✅ +{diff}"
+            lines.append(f"🔴 Maa Vaishno: {m}/{tm} ({pct}%) — {mark}")
+        if tu and tm:
+            tt = tu + tm
+            pct = int(t / tt * 100) if tt else 0
+            diff = t - tt
+            mark = f"❌ gap {-diff}" if diff < 0 else f"✅ +{diff}"
+            lines.append("")
+            lines.append(f"📌 Overall: {t}/{tt} ({pct}%) — {mark}")
+    return "\n".join(lines)
+
 def week_ach():
     now = datetime.now(); today = now.date()
     mon = today - timedelta(days=today.weekday())
@@ -725,7 +776,7 @@ def month_ach():
     t_sofar = u_sofar + m_sofar
     u_avg = int(u_sofar/dd) if dd else 0
     m_avg = int(m_sofar/dd) if dd else 0
-    lines = [f"📅 Monthly Achievement ({ms.strftime('%b %Y')})", "", f"Abhi tak ({dd} din):", f"🔵 Uday: {u_sofar}", f"🔴 Maa Vaishno: {m_sofar}", f"🎯 Total: {t_sofar}", "", "📊 Daily Avg:", f"🔵 Uday: {u_avg}/din", f"🔴 Maa Vaishno: {m_avg}/din"]
+    lines = [f"📅 MTD Achievement ({ms.strftime('%b %Y')})", "", f"Abhi tak ({dd} din):", f"🔵 Uday: {u_sofar}", f"🔴 Maa Vaishno: {m_sofar}", f"🎯 Total: {t_sofar}", "", "📊 Daily Avg:", f"🔵 Uday: {u_avg}/din", f"🔴 Maa Vaishno: {m_avg}/din"]
     mt_u = get_target("uday", "month")
     mt_m = get_target("mv", "month")
     if mt_u or mt_m:
@@ -784,7 +835,7 @@ def dist_cmp(days=7, today_only=False):
     w = "🔵 Uday Comm Agr" if ut > mt else ("🔴 Maa Vaishno Telecom" if mt > ut else "Tie")
     hdr = "⚖️ Distributor Comparison (AAJ)" if today_only else f"⚖️ Distributor Comparison (last {days} days)"
     return "\n".join([hdr, "", f"🔵 Uday Comm Agr: {ut} ({up}%)", f"   Avg: {ua}/din | Best: {d['labels'][ubi]} ({max(d['uday'])})", "", f"🔴 Maa Vaishno: {mt} ({mp}%)", f"   Avg: {ma}/din | Best: {d['labels'][mbi]} ({max(d['mv'])})", "", f"🏆 Winner: {w}"])
-    
+
 
 @app.route('/check-performance', methods=['GET'])
 def chk_perf():
@@ -837,7 +888,7 @@ def save_ep():
         return "Saved", 200
     except Exception as e:
         return "Error: " + str(e), 500
-        
+
 
 @app.route('/noon-check', methods=['GET'])
 def noon_check():
@@ -941,7 +992,7 @@ def report_missing():
         return "Alert sent", 200
     except Exception as e:
         return "Error: " + str(e), 500
-        
+
 
 @bot.message_handler(func=lambda m: True)
 def handle(message):
@@ -973,7 +1024,6 @@ def handle(message):
         un = message.from_user.username
         adm = is_admin(uid, un)
 
-        # SAVE AS COMMAND
         savem = re.search(r'save\s+as\s+(\d{1,2})\s*([a-z]+)\s*(\d{1,2})(?::(\d{2}))?', lo)
         if savem and message.reply_to_message and adm:
             try:
@@ -988,17 +1038,20 @@ def handle(message):
                 dt = datetime(yr, MON[mstr], dyy, hr, mi)
                 ts = dt.timestamp() - IST
                 orig = message.reply_to_message.text or ""
-                p = parse_mnp(orig)
-                if not p:
-                    bot.reply_to(message, "❌ Ye MNP report nahi hai.")
-                    return
-                get_db().insert_one({"text": orig, "timestamp": ts, "date_str": ts_str(ts), "parsed": p})
-                bot.reply_to(message, f"✅ Report saved: {dt.strftime('%d %b %Y %H:%M')}")
+                p_mnp = parse_mnp(orig)
+                p_bal = parse_bal(orig)
+                if p_mnp:
+                    get_db().insert_one({"text": orig, "timestamp": ts, "date_str": ts_str(ts), "parsed": p_mnp})
+                    bot.reply_to(message, f"✅ MNP Report saved: {dt.strftime('%d %b %Y %H:%M')}")
+                elif p_bal:
+                    get_db().insert_one({"text": orig, "timestamp": ts, "date_str": ts_str(ts), "type": "balance", "parsed": p_bal})
+                    bot.reply_to(message, f"✅ Balance Report saved: {dt.strftime('%d %b %Y %H:%M')}")
+                else:
+                    bot.reply_to(message, "❌ Ye MNP ya Balance report nahi hai.")
             except Exception as ee:
                 bot.reply_to(message, f"❌ Error: {str(ee)}")
             return
 
-        # DELETE LAST COMMAND
         if lo.strip() in ["delete last", "last delete", "undo"]:
             if not adm:
                 bot.reply_to(message, "❌ Sirf admin.")
@@ -1017,6 +1070,7 @@ def handle(message):
             bot.reply_to(message, f"{r}\n\nUsername: @{un or 'not set'}\nUser ID: {uid}")
             return
 
+        # ===== NAYA ORGANIZED MENU =====
         if lo.strip() in ["/start", "/menu", "menu", "start", "help", "commands"]:
             if not check_perm("menu", adm):
                 bot.reply_to(message, "❌ Menu currently disabled hai.")
@@ -1024,22 +1078,18 @@ def handle(message):
             from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
             kb = InlineKeyboardMarkup(row_width=2)
             kb.add(
-                InlineKeyboardButton("📊 Bar Graph", callback_data="graph_bar"),
-                InlineKeyboardButton("🥧 Pie Chart", callback_data="graph_pie"),
-                InlineKeyboardButton("📈 Line Chart", callback_data="graph_line"),
-                InlineKeyboardButton("📊 MTD Bar", callback_data="graph_bar_mtd"),
-                InlineKeyboardButton("🥧 MTD Pie", callback_data="graph_pie_mtd"),
-                InlineKeyboardButton("📈 MTD Line", callback_data="graph_line_mtd"),
-                InlineKeyboardButton("📉 Aaj Projection", callback_data="proj_day"),
-                InlineKeyboardButton("📊 Weekly Proj", callback_data="proj_week"),
-                InlineKeyboardButton("📅 Monthly Proj", callback_data="proj_month"),
-                InlineKeyboardButton("⚠️ Performance", callback_data="perf_check"),
-                InlineKeyboardButton("🎯 Target Status", callback_data="tgt_status"),
+                InlineKeyboardButton("📊 Graphs", callback_data="menu_graphs"),
+                InlineKeyboardButton("📈 Projection", callback_data="menu_proj"),
+                InlineKeyboardButton("🎯 Performance", callback_data="menu_perf"),
                 InlineKeyboardButton("🚨 Stock Check", callback_data="stock_check"),
-                InlineKeyboardButton("📋 Weekly Summary", callback_data="weekly_summary"),
-                InlineKeyboardButton("🏆 Peak Hours", callback_data="peak_hours"),
                 InlineKeyboardButton("⚖️ Distributors", callback_data="dist_compare"),
+                InlineKeyboardButton("📋 Weekly Summary", callback_data="weekly_summary"),
             )
+            if adm:
+                kb.add(
+                    InlineKeyboardButton("🏆 Peak Hours", callback_data="peak_hours"),
+                    InlineKeyboardButton("🎯 Target Status", callback_data="tgt_status"),
+                )
             bot.reply_to(message, "🤖 DTR Mainpuri Bot Menu\n\nKya dekhna chahte ho?", reply_markup=kb)
             return
 
@@ -1109,7 +1159,7 @@ def handle(message):
             lines = ["🎯 Current Targets", "", "📆 Daily:", f"🔵 Uday: {s.get('target_day_uday', 0)}", f"🔴 Maa Vaishno: {s.get('target_day_mv', 0)}", "", "📊 Weekly:", f"🔵 Uday: {s.get('target_week_uday', 0)}", f"🔴 Maa Vaishno: {s.get('target_week_mv', 0)}", "", "📅 Monthly:", f"🔵 Uday: {s.get('target_month_uday', 0)}", f"🔴 Maa Vaishno: {s.get('target_month_mv', 0)}", "", f"⏰ Working hours: {int(a)}:00 se {int(b)}:00"]
             bot.reply_to(message, "\n".join(lines))
             return
-            
+
         if any(w in lo for w in ["stock check", "stock alert", "balance check", "low stock", "stock status"]):
             if not check_perm("stock_check", adm):
                 bot.reply_to(message, "❌ Currently disabled.")
@@ -1207,10 +1257,17 @@ def handle(message):
                     pass
             if any(w in lo for w in ["week", "hafte", "saaptah"]):
                 bot.reply_to(message, proj_week())
-            elif any(w in lo for w in ["month", "mahine", "mahina", "maasik"]):
+            elif any(w in lo for w in ["month", "mahine", "mahina", "maasik", "mtd"]):
                 bot.reply_to(message, proj_month())
             else:
                 bot.reply_to(message, projection("day"))
+            return
+
+        if any(w in lo for w in ["ftd", "aaj ka"]):
+            if not check_perm("performance", adm):
+                bot.reply_to(message, "❌ Currently disabled.")
+                return
+            bot.reply_to(message, day_ach())
             return
 
         if any(w in lo for w in ["ach", "achievement", "achiv", "achiev"]):
@@ -1250,8 +1307,8 @@ def handle(message):
             wb = "bar" in lo or "column" in lo
             wp = "pie" in lo or "share" in lo or "distribution" in lo
             wl = "line" in lo or "trend" in lo
-            wa = any(w in lo for w in ["sabhi", "full", "teeno", "all", "sab", "sare"])
             mtd = "mtd" in lo
+            wa = any(w in lo for w in ["sabhi", "full", "teeno", "all", "sab", "sare"])
             bot.send_message(message.chat.id, "⏳ Graph ban raha hai...")
             if wa:
                 ts = ["bar", "pie", "line"]
@@ -1270,11 +1327,11 @@ def handle(message):
             for t in ts:
                 try:
                     if t == "bar":
-                        u = bar_chart(31 if mtd else dy, mtd=mtd)
+                        u = bar_chart(dy, mtd=mtd)
                     elif t == "pie":
-                        u = pie_chart(31 if mtd else dy, mtd=mtd)
+                        u = pie_chart(dy, mtd=mtd)
                     else:
-                        u = line_chart(31 if mtd else dy, mtd=mtd)
+                        u = line_chart(dy, mtd=mtd)
                     bot.send_photo(message.chat.id, u)
                     time.sleep(1)
                 except Exception as ge:
@@ -1298,7 +1355,7 @@ def handle(message):
                 return
             bot.reply_to(message, monthly_sum())
             try:
-                bot.send_photo(message.chat.id, line_chart(30))
+                bot.send_photo(message.chat.id, line_chart(31, mtd=True))
             except:
                 pass
             return
@@ -1355,7 +1412,8 @@ def handle(message):
 BTN_MAP = {
     "graph_bar": "graphs", "graph_pie": "graphs", "graph_line": "graphs",
     "graph_bar_mtd": "graphs", "graph_pie_mtd": "graphs", "graph_line_mtd": "graphs",
-    "proj_day": "projections", "proj_week": "projections", "proj_month": "projections",
+    "proj_ftd": "projections", "proj_week": "projections", "proj_month": "projections",
+    "perf_ftd": "performance", "perf_week": "performance", "perf_month": "performance",
     "perf_check": "performance", "tgt_status": "target_status",
     "stock_check": "stock_check", "weekly_summary": "weekly_summary",
     "peak_hours": "peak_hours", "dist_compare": "distributors",
@@ -1371,10 +1429,81 @@ def cb(call):
         uid = call.from_user.id
         un = call.from_user.username
         adm = is_admin(uid, un)
+        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+        # ===== SUBMENU: GRAPHS =====
+        if d == "menu_graphs":
+            kb = InlineKeyboardMarkup(row_width=3)
+            kb.add(
+                InlineKeyboardButton("📊 Bar", callback_data="graph_bar"),
+                InlineKeyboardButton("📈 Line", callback_data="graph_line"),
+                InlineKeyboardButton("🥧 Pie", callback_data="graph_pie"),
+            )
+            kb.add(
+                InlineKeyboardButton("📊 MTD Bar", callback_data="graph_bar_mtd"),
+                InlineKeyboardButton("📈 MTD Line", callback_data="graph_line_mtd"),
+                InlineKeyboardButton("🥧 MTD Pie", callback_data="graph_pie_mtd"),
+            )
+            kb.add(InlineKeyboardButton("🔙 Back to Menu", callback_data="menu_main"))
+            bot.send_message(cid, "📊 Graphs Menu\n\nKaunsa graph chahiye?", reply_markup=kb)
+            return
+
+        # ===== SUBMENU: PROJECTION =====
+        if d == "menu_proj":
+            if not check_perm("projections", adm):
+                bot.send_message(cid, "❌ Currently disabled hai.")
+                return
+            kb = InlineKeyboardMarkup(row_width=1)
+            kb.add(
+                InlineKeyboardButton("📊 FTD Projection (Aaj)", callback_data="proj_ftd"),
+                InlineKeyboardButton("📅 Weekly Projection", callback_data="proj_week"),
+                InlineKeyboardButton("📅 MTD Projection (Month)", callback_data="proj_month"),
+                InlineKeyboardButton("🔙 Back to Menu", callback_data="menu_main"),
+            )
+            bot.send_message(cid, "📈 Projection Menu", reply_markup=kb)
+            return
+
+        # ===== SUBMENU: PERFORMANCE =====
+        if d == "menu_perf":
+            if not check_perm("performance", adm):
+                bot.send_message(cid, "❌ Currently disabled hai.")
+                return
+            kb = InlineKeyboardMarkup(row_width=1)
+            kb.add(
+                InlineKeyboardButton("📊 FTD Achievement (Aaj)", callback_data="perf_ftd"),
+                InlineKeyboardButton("📅 Weekly Achievement", callback_data="perf_week"),
+                InlineKeyboardButton("📅 MTD Achievement (Month)", callback_data="perf_month"),
+                InlineKeyboardButton("🔙 Back to Menu", callback_data="menu_main"),
+            )
+            bot.send_message(cid, "🎯 Performance Menu", reply_markup=kb)
+            return
+
+        # ===== BACK TO MAIN MENU =====
+        if d == "menu_main":
+            kb = InlineKeyboardMarkup(row_width=2)
+            kb.add(
+                InlineKeyboardButton("📊 Graphs", callback_data="menu_graphs"),
+                InlineKeyboardButton("📈 Projection", callback_data="menu_proj"),
+                InlineKeyboardButton("🎯 Performance", callback_data="menu_perf"),
+                InlineKeyboardButton("🚨 Stock Check", callback_data="stock_check"),
+                InlineKeyboardButton("⚖️ Distributors", callback_data="dist_compare"),
+                InlineKeyboardButton("📋 Weekly Summary", callback_data="weekly_summary"),
+            )
+            if adm:
+                kb.add(
+                    InlineKeyboardButton("🏆 Peak Hours", callback_data="peak_hours"),
+                    InlineKeyboardButton("🎯 Target Status", callback_data="tgt_status"),
+                )
+            bot.send_message(cid, "🤖 Main Menu", reply_markup=kb)
+            return
+
+        # ===== Permission check =====
         pk = BTN_MAP.get(d)
         if pk and not check_perm(pk, adm):
             bot.send_message(cid, "❌ Ye feature currently disabled hai.")
             return
+
+        # ===== GRAPHS =====
         if d == "graph_bar":
             bot.send_photo(cid, bar_chart(7))
         elif d == "graph_pie":
@@ -1382,19 +1511,31 @@ def cb(call):
         elif d == "graph_line":
             bot.send_photo(cid, line_chart(7))
         elif d == "graph_bar_mtd":
-            bot.send_photo(cid, bar_chart(31, mtd=True))
+            bot.send_photo(cid, bar_chart(mtd=True))
         elif d == "graph_pie_mtd":
-            bot.send_photo(cid, pie_chart(31, mtd=True))
+            bot.send_photo(cid, pie_chart(mtd=True))
         elif d == "graph_line_mtd":
-            bot.send_photo(cid, line_chart(31, mtd=True))
-        elif d == "proj_day":
+            bot.send_photo(cid, line_chart(mtd=True))
+
+        # ===== PROJECTION =====
+        elif d == "proj_ftd":
             bot.send_message(cid, projection("day"))
         elif d == "proj_week":
             bot.send_message(cid, proj_week())
         elif d == "proj_month":
             bot.send_message(cid, proj_month())
+
+        # ===== PERFORMANCE =====
+        elif d == "perf_ftd":
+            bot.send_message(cid, day_ach())
+        elif d == "perf_week":
+            bot.send_message(cid, week_ach())
+        elif d == "perf_month":
+            bot.send_message(cid, month_ach())
         elif d == "perf_check":
             bot.send_message(cid, perf_alert())
+
+        # ===== OTHER =====
         elif d == "tgt_status":
             s = get_settings()
             a, b = get_wh()
