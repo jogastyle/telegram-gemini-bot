@@ -706,6 +706,8 @@ def proj_till(dy, mon_num):
 
 def peak_hours(days=7):
     now = datetime.now()
+    ws_h = 7
+    we_h = 21
     s = now - timedelta(days=days-1)
     us = s.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() - IST
     reps = list(get_db().find({"timestamp": {"$gte": us}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", 1))
@@ -715,9 +717,11 @@ def peak_hours(days=7):
     for r in reps:
         k = time.strftime("%Y-%m-%d", time.gmtime(r["timestamp"] + IST))
         bd.setdefault(k, []).append(r)
-    hr = {}
+    hr_total = {}
+    hr_days = {}
     for k, rr in bd.items():
         prev = 0
+        day_hours = set()
         for r in rr:
             p = r.get("parsed") or parse_mnp(r.get("text", ""))
             if not p: continue
@@ -726,14 +730,71 @@ def peak_hours(days=7):
                 d = ct - prev
                 if d > 0:
                     h = datetime.fromtimestamp(r["timestamp"] + IST).hour
-                    hr[h] = hr.get(h, 0) + d
+                    if ws_h <= h < we_h:
+                        hr_total[h] = hr_total.get(h, 0) + d
+                        day_hours.add(h)
             prev = ct
+        for h in day_hours:
+            hr_days[h] = hr_days.get(h, 0) + 1
+    if not hr_total:
+        return "❌ Working hours (7 AM - 9 PM) me koi data nahi mila."
+    combined = []
+    for h, tot in hr_total.items():
+        active_days = hr_days.get(h, 1)
+        avg = int(tot / active_days) if active_days else 0
+        combined.append((h, tot, avg, active_days))
+    combined.sort(key=lambda x: -x[2])
+    top5 = combined[:5]
+    lines = [f"🕐 Peak Hours (Last {days} Days)", f"⏰ 7:00 AM - 9:00 PM", ""]
+    for i, (h, tot, avg, ad) in enumerate(top5, 1):
+        medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "•"
+        lines.append(f"{medal} {h:02d}:00 - {h+1:02d}:00 → avg {avg} MNP")
+    if top5:
+        best_h, best_tot, best_avg, _ = top5[0]
+        lines.append("")
+        lines.append(f"📊 Sabse zyada business: {best_h:02d}:00-{best_h+1:02d}:00 (avg {best_avg}/din)")
+    return "\n".join(lines)
+
+def peak_hour_for_date(target_date):
+    ws_h = 7
+    we_h = 21
+    s = datetime.combine(target_date, datetime.min.time()).timestamp() - IST
+    e = s + 86400
+    reps = list(get_db().find({"timestamp": {"$gte": s, "$lt": e}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", 1))
+    if not reps:
+        return f"❌ {target_date.strftime('%d %b')} ko koi MNP report nahi aayi."
+    hr = {}
+    prev = 0
+    for r in reps:
+        p = r.get("parsed") or parse_mnp(r.get("text", ""))
+        if not p: continue
+        ct = (p.get("total") or {}).get("total", 0)
+        if prev > 0:
+            d = ct - prev
+            if d > 0:
+                h = datetime.fromtimestamp(r["timestamp"] + IST).hour
+                if ws_h <= h < we_h:
+                    hr[h] = hr.get(h, 0) + d
+        prev = ct
     if not hr:
-        return "❌ Data parse nahi ho paaya."
-    sh = sorted(hr.items(), key=lambda x: -x[1])[:5]
-    lines = [f"🕐 Peak Hours (last {days} days)", ""]
-    for h, c in sh:
-        lines.append(f"• {h:02d}:00 - {h+1:02d}:00 → {c} MNP")
+        return f"❌ {target_date.strftime('%d %b')} ko working hours (7 AM - 9 PM) me koi data nahi."
+    sh = sorted(hr.items(), key=lambda x: -x[1])
+    day_label = target_date.strftime('%d %b %Y')
+    today = datetime.now().date()
+    if target_date == today:
+        day_label = "Aaj"
+    elif target_date == today - timedelta(days=1):
+        day_label = "Kal"
+    elif target_date == today - timedelta(days=2):
+        day_label = "Parso"
+    lines = [f"🕐 Peak Hour — {day_label} ({target_date.strftime('%d %b %Y')})", f"⏰ 7:00 AM - 9:00 PM", ""]
+    for i, (h, c) in enumerate(sh[:5], 1):
+        medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "•"
+        lines.append(f"{medal} {h:02d}:00 - {h+1:02d}:00 → {c} MNP")
+    if sh:
+        best_h, best_c = sh[0]
+        lines.append("")
+        lines.append(f"📊 Best hour: {best_h:02d}:00-{best_h+1:02d}:00 ({best_c} MNP)")
     return "\n".join(lines)
 
 def growth(period="week"):
@@ -1332,9 +1393,33 @@ def handle(message):
             return
 
         # ===== PEAK HOURS =====
-        if any(w in lo for w in ["peak hour", "peak hours", "peak time", "kis time sabse zyada"]):
+               if any(w in lo for w in ["peak hour", "peak hours", "peak time", "kis time sabse zyada"]):
             if not check_perm("peak_hours", adm):
                 bot.reply_to(message, "❌ Currently disabled.")
+                return
+            day_found = None
+            if "kal" in lo or "yesterday" in lo:
+                day_found = datetime.now().date() - timedelta(days=1)
+            elif "aaj" in lo or "today" in lo:
+                day_found = datetime.now().date()
+            elif "parso" in lo:
+                day_found = datetime.now().date() - timedelta(days=2)
+            else:
+                dm = re.search(r'(\d{1,2})\s*([a-z]{3,9})', lo)
+                if dm:
+                    try:
+                        dyy = int(dm.group(1))
+                        mstr = dm.group(2).lower()[:3]
+                        if mstr in MON and 1 <= dyy <= 31:
+                            yr = datetime.now().year
+                            cand = datetime(yr, MON[mstr], dyy).date()
+                            if cand > datetime.now().date():
+                                cand = datetime(yr-1, MON[mstr], dyy).date()
+                            day_found = cand
+                    except:
+                        pass
+            if day_found:
+                bot.reply_to(message, peak_hour_for_date(day_found))
                 return
             dy = 7
             d = re.search(r'(\d{1,2})\s*(?:din|days)', lo)
