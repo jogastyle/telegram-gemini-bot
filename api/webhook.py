@@ -324,6 +324,35 @@ def line_chart(days=7, mtd=False):
         "legend": {"position": "bottom"}, "layout": {"padding": {"top": 40}}}}
     return qc(cfg)
 
+def dist_chart(dist, ctype="bar", days=7, mtd=False):
+    d = daily_data(days, mtd=mtd)
+    if "uday" in dist.lower():
+        vals = d["uday"]; n = "Uday Comm Agr"; color = "#2196F3"
+    else:
+        vals = d["mv"]; n = "Maa Vaishno Telecom"; color = "#F44336"
+    title_txt = f"{n} - MTD" if mtd else f"{n} - Last {days} Days"
+    if ctype == "bar":
+        cfg = {"type": "bar", "data": {"labels": d["labels"], "datasets": [
+            {"label": n, "data": vals, "backgroundColor": color}]},
+            "options": {"title": {"display": True, "text": title_txt, "fontSize": 16},
+            "legend": {"display": False},
+            "plugins": {"datalabels": {"display": True, "color": "white", "anchor": "center", "align": "center",
+            "font": {"size": 11, "weight": "bold"}, "formatter": "function(v){return v>0?v:'';}"}}}}
+    elif ctype == "line":
+        cfg = {"type": "line", "data": {"labels": d["labels"], "datasets": [
+            {"label": n, "data": vals, "borderColor": color, "fill": False, "tension": 0.3, "borderWidth": 3,
+             "datalabels": {"display": True, "align": "top", "anchor": "end", "offset": 6, "color": color, "font": {"size": 11, "weight": "bold"}, "formatter": "function(v){return v>0?v:'';}"}}]},
+            "options": {"title": {"display": True, "text": title_txt, "fontSize": 16},
+            "legend": {"display": False}, "layout": {"padding": {"top": 40}}}}
+    else:  # pie
+        tot = sum(vals)
+        cfg = {"type": "doughnut", "data": {"labels": [n], "datasets": [{"data": [tot], "backgroundColor": [color]}]},
+            "options": {"title": {"display": True, "text": title_txt + f" (Total: {tot})", "fontSize": 16},
+            "legend": {"position": "bottom"},
+            "plugins": {"datalabels": {"display": True, "color": "white", "font": {"size": 14, "weight": "bold"},
+            "formatter": "function(v){return v;}"}}}}
+    return qc(cfg)
+
 
 def weekly_sum():
     d = daily_data(7)
@@ -1164,6 +1193,7 @@ def handle(message):
             kb.add(
                 InlineKeyboardButton("📅 Month vs Month", callback_data="mom_compare"),
                 InlineKeyboardButton("🏆 Best/Worst", callback_data="best_worst"),
+                InlineKeyboardButton("📊 Distributor Charts", callback_data="menu_dist"),
             )
             if adm:
                 kb.add(
@@ -1409,6 +1439,25 @@ def handle(message):
             return
 
         # ===== GRAPHS =====
+                # ===== DISTRIBUTOR-SPECIFIC CHARTS =====
+        dcm = re.search(r'\b(uday|mv|vaishno|maa\s*vaishno)\b.*\b(bar|line|pie)\b', lo)
+        if dcm and ("chart" in lo or "graph" in lo or dcm.start() == 0 or lo.strip().startswith(dcm.group(1))):
+            if not check_perm("graphs", adm):
+                bot.reply_to(message, "❌ Currently disabled.")
+                return
+            dist = "uday" if "uday" in dcm.group(1) else "mv"
+            ctype = dcm.group(2)
+            mtd = "mtd" in lo
+            dy = 7
+            d = re.search(r'(\d{1,2})\s*(?:din|days)', lo)
+            if d:
+                dy = int(d.group(1))
+            bot.send_message(message.chat.id, "⏳ Chart ban raha hai...")
+            try:
+                bot.send_photo(message.chat.id, dist_chart(dist, ctype, dy, mtd=mtd))
+            except Exception as ge:
+                bot.send_message(message.chat.id, f"Chart error: {str(ge)}")
+            return
         if any(w in lo for w in ["graph", "chart"]):
             if not check_perm("graphs", adm):
                 bot.reply_to(message, "❌ Currently disabled.")
@@ -1593,7 +1642,37 @@ def cb(call):
             )
             bot.send_message(cid, "🎯 Performance Menu", reply_markup=kb)
             return
+        # ===== SUBMENU: DISTRIBUTOR CHARTS =====
+        if d == "menu_dist":
+            kb = InlineKeyboardMarkup(row_width=3)
+            kb.add(InlineKeyboardButton("🔵 UDAY COMM AGR", callback_data="noop"))
+            kb.add(
+                InlineKeyboardButton("📊 Bar", callback_data="dist_uday_bar"),
+                InlineKeyboardButton("📈 Line", callback_data="dist_uday_line"),
+                InlineKeyboardButton("🥧 Pie", callback_data="dist_uday_pie"),
+            )
+            kb.add(
+                InlineKeyboardButton("📊 MTD Bar", callback_data="dist_uday_mtd_bar"),
+                InlineKeyboardButton("📈 MTD Line", callback_data="dist_uday_mtd_line"),
+                InlineKeyboardButton("🥧 MTD Pie", callback_data="dist_uday_mtd_pie"),
+            )
+            kb.add(InlineKeyboardButton("🔴 MAA VAISHNO TELECOM", callback_data="noop"))
+            kb.add(
+                InlineKeyboardButton("📊 Bar", callback_data="dist_mv_bar"),
+                InlineKeyboardButton("📈 Line", callback_data="dist_mv_line"),
+                InlineKeyboardButton("🥧 Pie", callback_data="dist_mv_pie"),
+            )
+            kb.add(
+                InlineKeyboardButton("📊 MTD Bar", callback_data="dist_mv_mtd_bar"),
+                InlineKeyboardButton("📈 MTD Line", callback_data="dist_mv_mtd_line"),
+                InlineKeyboardButton("🥧 MTD Pie", callback_data="dist_mv_mtd_pie"),
+            )
+            kb.add(InlineKeyboardButton("🔙 Back to Menu", callback_data="menu_main"))
+            bot.send_message(cid, "📊 Distributor Charts\n\nKis distributor ka chart chahiye?", reply_markup=kb)
+            return
 
+        if d == "noop":
+            return
         # ===== BACK TO MAIN MENU =====
         if d == "menu_main":
             kb = InlineKeyboardMarkup(row_width=2)
@@ -1608,6 +1687,7 @@ def cb(call):
             kb.add(
                 InlineKeyboardButton("📅 Month vs Month", callback_data="mom_compare"),
                 InlineKeyboardButton("🏆 Best/Worst", callback_data="best_worst"),
+                InlineKeyboardButton("📊 Distributor Charts", callback_data="menu_dist"),
             )
             if adm:
                 kb.add(
@@ -1678,6 +1758,16 @@ def cb(call):
                 pass
         elif d == "peak_hours":
             bot.send_message(cid, peak_hours(7))
+                    elif d and d.startswith("dist_"):
+            parts = d.replace("dist_", "").split("_")
+            dist = parts[0]
+            mtd = False
+            if len(parts) > 2 and parts[1] == "mtd":
+                ctype = parts[2]
+                mtd = True
+            else:
+                ctype = parts[1]
+            bot.send_photo(cid, dist_chart(dist, ctype, 7, mtd=mtd))
         elif d == "dist_compare":
             bot.send_message(cid, dist_cmp(7))
     except Exception as e:
