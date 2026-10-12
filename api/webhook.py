@@ -1227,7 +1227,24 @@ def report_missing():
     except Exception as e:
         return "Error: " + str(e), 500
 
-
+@app.route('/debug-ftd', methods=['GET'])
+def debug_ftd():
+    try:
+        now = datetime.now()
+        today = now.date()
+        utc0 = datetime.combine(today, datetime.min.time()).timestamp() - IST
+        reps = list(get_db().find({"timestamp": {"$gte": utc0}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", 1))
+        out = [f"Reports found: {len(reps)}", ""]
+        for r in reps[-2:]:
+            out.append(f"Time: {r.get('date_str', '?')}")
+            out.append(f"Text: {r.get('text', '')[:300]}")
+            parsed = r.get('parsed') or {}
+            out.append(f"Distributors: {list(parsed.get('distributors', {}).keys())}")
+            out.append(f"Total: {parsed.get('total')}")
+            out.append("---")
+        return "<pre>" + "\n".join(out) + "</pre>", 200
+    except Exception as e:
+        return "Error: " + str(e), 500
 @bot.message_handler(func=lambda m: True)
 def handle(message):
     try:
