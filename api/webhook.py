@@ -352,7 +352,7 @@ def parse_range(lo):
     except:
         return None, None
 
-    def qc(config, w=800, h=400):
+def qc(config, w=800, h=400):
     e = urllib.parse.quote(json.dumps(config))
     return f"https://quickchart.io/chart?c={e}&w={w}&h={h}&bkg=white&plugins=chartjs-plugin-datalabels"
 
@@ -522,7 +522,7 @@ def peak_hour_for_date(target_date):
         lines.append(f"📊 Best hour: {best_h:02d}:00-{best_h+1:02d}:00 ({best_c} MNP)")
     return "\n".join(lines)
 
-    def weekly_sum():
+def weekly_sum():
     d = daily_data(7)
     dt = d["dist_totals"]
     u_total = dt.get("Uday Comm Agr", 0)
@@ -1228,7 +1228,6 @@ def handle(message):
         is_priv = message.chat.type == "private"
         is_sr_group = chat_id_str in get_sr_groups()
 
-        # ===== SAARE USERS KO TRACK KARO (private ya group) =====
         if not is_sr_group:
             try:
                 add_known_user(uid, un, fname)
@@ -1237,7 +1236,6 @@ def handle(message):
 
         # ===== SR GROUPS LOGIC =====
         if is_sr_group:
-            # Sirf admin SR group me AI toggle kar sakta hai
             if adm and text:
                 lo_sr = text.lower().strip()
                 if lo_sr in ["sr ai on", "/sr ai on", "ai on"]:
@@ -1248,7 +1246,6 @@ def handle(message):
                     set_sr_ai(False)
                     bot.reply_to(message, "🔇 SR AI reply OFF ho gaya\n\nAb SR groups me koi bhi message aayega to bot chup rahega.")
                     return
-            # AI reply agar enabled hai
             if sr_ai_enabled() and text and not text.startswith("/"):
                 try:
                     r = client.chat.completions.create(
@@ -1259,13 +1256,12 @@ def handle(message):
                     bot.reply_to(message, r.choices[0].message.content.strip())
                 except Exception:
                     pass
-            return  # SR group me data save nahi karna, aur kuch nahi
+            return
 
         # ===== MAIN GROUP + PRIVATE CHAT LOGIC =====
         if message.chat.id == int(GROUP_CHAT_ID) and ("FTA MNP" in text or "FTD" in text):
             save_mnp(text, msg_ts)
 
-        # ===== FLEXIBLE BALANCE REPORT DETECTION =====
         if is_balance_report(text):
             p = save_bal(text, msg_ts)
             if p:
@@ -1284,7 +1280,6 @@ def handle(message):
         if not is_priv and not is_tag and not is_rep_bot:
             return
 
-        # ===== PRIVATE CHAT ME UNKNOWN USER CHECK =====
         if is_priv and not adm and not is_known_user(uid):
             bot.reply_to(message, "🙏 Ye bot sirf DTR Mainpuri group ke liye hai.\n\nAap is group ke member nahi hain. Kripya group me contact karein.")
             return
@@ -1338,7 +1333,6 @@ def handle(message):
             bot.reply_to(message, "\n".join(lines), parse_mode="Markdown")
             return
 
-        # SAVE AS COMMAND
         savem = re.search(r'save\s+as\s+(\d{1,2})\s*([a-z]+)\s*(\d{1,2})(?::(\d{2}))?', lo)
         if savem and message.reply_to_message and adm:
             try:
@@ -1385,7 +1379,6 @@ def handle(message):
             bot.reply_to(message, f"{r}\n\nUsername: @{un or 'not set'}\nUser ID: {uid}\nName: {fname}")
             return
 
-        # ===== MENU =====
         if lo.strip() in ["/start", "/menu", "menu", "start", "help", "commands"]:
             if not check_perm("menu", adm):
                 bot.reply_to(message, "❌ Menu currently disabled hai.")
@@ -1807,6 +1800,405 @@ def handle(message):
         except:
             pass
 
+
+        # ===== DISTRIBUTOR-SPECIFIC CHARTS =====
+        dcm = re.search(r'\b(uday|mv|vaishno|maa\s*vaishno)\b.*\b(bar|line|pie)\b', lo)
+        if dcm and ("chart" in lo or "graph" in lo or dcm.start() == 0 or lo.strip().startswith(dcm.group(1))):
+            if not check_perm("graphs", adm):
+                bot.reply_to(message, "❌ Currently disabled.")
+                return
+            dist = "uday" if "uday" in dcm.group(1) else "mv"
+            ctype = dcm.group(2)
+            mtd = "mtd" in lo
+            dy = 7
+            d = re.search(r'(\d{1,2})\s*(?:din|days)', lo)
+            if d:
+                dy = int(d.group(1))
+            bot.send_message(message.chat.id, "⏳ Chart ban raha hai...")
+            try:
+                bot.send_photo(message.chat.id, dist_chart(dist, ctype, dy, mtd=mtd))
+            except Exception as ge:
+                bot.send_message(message.chat.id, f"Chart error: {str(ge)}")
+            return
+
+        # ===== CUSTOM DATE RANGE =====
+        if "report" in lo and (" se " in lo or " to " in lo):
+            sd, ed = parse_range(lo)
+            if sd and ed:
+                bot.reply_to(message, custom_range(sd, ed))
+                return
+
+        # ===== MONTH vs MONTH =====
+        if ("month compare" in lo or "mtd vs last" in lo or "mom" in lo or
+            ("month" in lo and "compare" in lo)):
+            bot.reply_to(message, mom_compare())
+            return
+
+        # ===== BEST / WORST =====
+        if "best day" in lo or "worst day" in lo or "best/worst" in lo:
+            dy = 30
+            d = re.search(r'(\d{1,2})\s*(?:din|days)', lo)
+            if d:
+                dy = int(d.group(1))
+            bot.reply_to(message, best_worst(dy))
+            return
+
+        # ===== PEAK HOURS =====
+        if any(w in lo for w in ["peak hour", "peak hours", "peak time", "kis time sabse zyada"]):
+            if not check_perm("peak_hours", adm):
+                bot.reply_to(message, "❌ Currently disabled.")
+                return
+            day_found = None
+            if "kal" in lo or "yesterday" in lo:
+                day_found = datetime.now().date() - timedelta(days=1)
+            elif "aaj" in lo or "today" in lo:
+                day_found = datetime.now().date()
+            elif "parso" in lo:
+                day_found = datetime.now().date() - timedelta(days=2)
+            else:
+                dm = re.search(r'(\d{1,2})\s*([a-z]{3,9})', lo)
+                if dm:
+                    try:
+                        dyy = int(dm.group(1))
+                        mstr = dm.group(2).lower()[:3]
+                        if mstr in MON and 1 <= dyy <= 31:
+                            yr = datetime.now().year
+                            cand = datetime(yr, MON[mstr], dyy).date()
+                            if cand > datetime.now().date():
+                                cand = datetime(yr-1, MON[mstr], dyy).date()
+                            day_found = cand
+                    except:
+                        pass
+            if day_found:
+                bot.reply_to(message, peak_hour_for_date(day_found))
+                return
+            dy = 7
+            d = re.search(r'(\d{1,2})\s*(?:din|days)', lo)
+            if d:
+                dy = int(d.group(1))
+            bot.reply_to(message, peak_hours(dy))
+            return
+
+        # ===== WORKING HOURS =====
+        whm = re.search(r'working\s*hours?\s*(\d{1,2})(?::(\d{2}))?\s*(?:se|to|-)\s*(\d{1,2})(?::(\d{2}))?', lo)
+        if whm and (is_tag or is_priv):
+            if not check_perm("working_hours", adm):
+                bot.reply_to(message, "❌ Sirf admins.")
+                return
+            a = int(whm.group(1)) + (int(whm.group(2))/60 if whm.group(2) else 0)
+            b = int(whm.group(3)) + (int(whm.group(4))/60 if whm.group(4) else 0)
+            set_wh(a, b)
+            bot.reply_to(message, f"✅ Working hours set: {int(a)}:00 se {int(b)}:00")
+            return
+
+        if ("working hours" in lo or "working hrs" in lo) and any(w in lo for w in ["status", "kitna", "check", "dikhao"]):
+            a, b = get_wh()
+            bot.reply_to(message, f"⏰ Current working hours: {int(a)}:00 se {int(b)}:00")
+            return
+
+        # ===== TARGETS =====
+        wtm = re.search(r'(uday|mv|maa\s*vaishno|vaishno)\s*week\s*(?:target|tgt)\s*(\d+)', lo)
+        if wtm and (is_tag or is_priv):
+            if not check_perm("target_set", adm):
+                bot.reply_to(message, "❌ Sirf admins.")
+                return
+            k = "uday" if "uday" in wtm.group(1) else "mv"
+            v = int(wtm.group(2))
+            set_target(k, v, "week")
+            nm = "Uday Comm Agr" if k == "uday" else "Maa Vaishno Telecom"
+            bot.reply_to(message, f"✅ {nm} Weekly Target set: {v}")
+            return
+
+        mtm = re.search(r'(uday|mv|maa\s*vaishno|vaishno)\s*month\s*(?:target|tgt)\s*(\d+)', lo)
+        if mtm and (is_tag or is_priv):
+            if not check_perm("target_set", adm):
+                bot.reply_to(message, "❌ Sirf admins.")
+                return
+            k = "uday" if "uday" in mtm.group(1) else "mv"
+            v = int(mtm.group(2))
+            set_target(k, v, "month")
+            nm = "Uday Comm Agr" if k == "uday" else "Maa Vaishno Telecom"
+            bot.reply_to(message, f"✅ {nm} Monthly Target set: {v}")
+            return
+
+        tg = re.search(r'(uday|maa\s*vaishno|mv|vaishno)\s*(?:target|tgt)\s*(\d+)', lo)
+        if tg:
+            dk = tg.group(1); vl = int(tg.group(2))
+        else:
+            tg = re.search(r'(?:target|tgt)\s*(?:set\s*)?(uday|maa\s*vaishno|mv|vaishno)\s*(\d+)', lo)
+            if tg:
+                dk = tg.group(1); vl = int(tg.group(2))
+            else:
+                dk = None; vl = None
+        if dk and vl is not None and (is_tag or is_priv):
+            if not check_perm("target_set", adm):
+                bot.reply_to(message, "❌ Sirf admins.")
+                return
+            if "uday" in dk:
+                set_target("uday", vl, "day")
+                bot.reply_to(message, f"✅ Uday Comm Agr Daily Target set: {vl}")
+            else:
+                set_target("mv", vl, "day")
+                bot.reply_to(message, f"✅ Maa Vaishno Telecom Daily Target set: {vl}")
+            return
+
+        if ("target" in lo or "tgt" in lo) and any(w in lo for w in ["status", "kitna", "check", "dikhao"]):
+            s = get_settings(); a, b = get_wh()
+            lines = ["🎯 Current Targets", "", "📆 Daily:", f"🔵 Uday: {s.get('target_day_uday', 0)}", f"🔴 Maa Vaishno: {s.get('target_day_mv', 0)}", "", "📊 Weekly:", f"🔵 Uday: {s.get('target_week_uday', 0)}", f"🔴 Maa Vaishno: {s.get('target_week_mv', 0)}", "", "📅 Monthly:", f"🔵 Uday: {s.get('target_month_uday', 0)}", f"🔴 Maa Vaishno: {s.get('target_month_mv', 0)}"]
+            bot.reply_to(message, "\n".join(lines))
+            return
+
+        # ===== STOCK CHECK =====
+        if any(w in lo for w in ["stock check", "stock alert", "balance check", "low stock", "stock status"]):
+            if not check_perm("stock_check", adm):
+                bot.reply_to(message, "❌ Currently disabled.")
+                return
+            th = get_settings().get("stock_threshold", 3)
+            t2 = re.search(r'threshold\s*(\d+)', lo)
+            if t2:
+                th = int(t2.group(1))
+            bot.reply_to(message, stock_chk(th))
+            return
+
+        stm = re.search(r'stock\s*threshold\s*(\d+)', lo)
+        if stm and (is_tag or is_priv):
+            if not check_perm("stock_threshold", adm):
+                bot.reply_to(message, "❌ Sirf admins.")
+                return
+            upd_setting("stock_threshold", int(stm.group(1)))
+            bot.reply_to(message, f"✅ Stock alert threshold set: {stm.group(1)} din")
+            return
+
+        # ===== GROWTH =====
+        if any(w in lo for w in ["growth", "growth rate", "kitne percent badha", "kitna badha", "vikas"]):
+            if not check_perm("performance", adm):
+                bot.reply_to(message, "❌ Currently disabled.")
+                return
+            if any(w in lo for w in ["month", "mahine", "mahina"]):
+                bot.reply_to(message, growth("month"))
+            else:
+                bot.reply_to(message, growth("week"))
+            return
+
+        # ===== ACHIEVEMENTS =====
+        if "month" in lo and any(w in lo for w in ["ach", "achievement"]):
+            if not check_perm("performance", adm):
+                bot.reply_to(message, "❌ Currently disabled.")
+                return
+            bot.reply_to(message, month_ach())
+            return
+
+        if "mahine" in lo and any(w in lo for w in ["ach", "achievement", "performance"]):
+            if not check_perm("performance", adm):
+                bot.reply_to(message, "❌ Currently disabled.")
+                return
+            bot.reply_to(message, month_ach())
+            return
+
+        if "week" in lo and any(w in lo for w in ["ach", "achievement"]):
+            if not check_perm("performance", adm):
+                bot.reply_to(message, "❌ Currently disabled.")
+                return
+            bot.reply_to(message, week_ach())
+            return
+
+        if "hafte" in lo and any(w in lo for w in ["ach", "achievement", "performance"]):
+            if not check_perm("performance", adm):
+                bot.reply_to(message, "❌ Currently disabled.")
+                return
+            bot.reply_to(message, week_ach())
+            return
+
+        # ===== CUSTOM REPORTS =====
+        cr = re.search(r'(uday|mv|maa\s*vaishno|vaishno)\s*(?:ka\s*)?report', lo)
+        if cr:
+            if not check_perm("custom_report", adm):
+                bot.reply_to(message, "❌ Currently disabled.")
+                return
+            dy = 7
+            d = re.search(r'(\d{1,2})\s*(?:din|days)', lo)
+            if d:
+                dy = int(d.group(1))
+            bot.reply_to(message, cust_rep(cr.group(1), dy))
+            return
+
+        # ===== PROJECTIONS =====
+        if any(w in lo for w in ["projection", "prediction", "predict", "forecast", "anuman"]):
+            if not check_perm("projections", adm):
+                bot.reply_to(message, "❌ Currently disabled.")
+                return
+            dm = re.search(r'(\d{1,2})\s*([a-z]{3,9})', lo)
+            if dm:
+                try:
+                    dyy = int(dm.group(1))
+                    mstr = dm.group(2).lower()[:3]
+                    if mstr in MON and 1 <= dyy <= 31:
+                        bot.reply_to(message, proj_till(dyy, MON[mstr]))
+                        return
+                except:
+                    pass
+            if any(w in lo for w in ["week", "hafte", "saaptah"]):
+                bot.reply_to(message, proj_week())
+            elif any(w in lo for w in ["month", "mahine", "mahina", "maasik", "mtd"]):
+                bot.reply_to(message, proj_month())
+            else:
+                bot.reply_to(message, projection("day"))
+            return
+
+        # ===== FTD =====
+        if any(w in lo for w in ["ftd", "aaj ka"]):
+            if not check_perm("performance", adm):
+                bot.reply_to(message, "❌ Currently disabled.")
+                return
+            bot.reply_to(message, day_ach())
+            return
+
+        # ===== ACHIEVEMENT ALERT =====
+        if any(w in lo for w in ["ach", "achievement", "achiv", "achiev"]):
+            if not check_perm("performance", adm):
+                bot.reply_to(message, "❌ Currently disabled.")
+                return
+            t = ext_time(lo)
+            bot.reply_to(message, perf_alert(t[0], t[1]) if t else perf_alert())
+            return
+
+        hp = any(w in lo for w in ["performance", "perfomance", "alert"])
+        hc = any(w in lo for w in ["check", "karo", "do", "batao", "dikhao", "dekho"])
+        if hp and hc:
+            if not check_perm("performance", adm):
+                bot.reply_to(message, "❌ Currently disabled.")
+                return
+            t = ext_time(lo)
+            bot.reply_to(message, perf_alert(t[0], t[1]) if t else perf_alert())
+            return
+
+        if "till" in lo and any(w in lo for w in ["check", "performance", "alert"]):
+            if not check_perm("performance", adm):
+                bot.reply_to(message, "❌ Currently disabled.")
+                return
+            t = ext_time(lo)
+            bot.reply_to(message, perf_alert(t[0], t[1]) if t else perf_alert())
+            return
+
+        # ===== GRAPHS =====
+        if any(w in lo for w in ["graph", "chart"]):
+            if not check_perm("graphs", adm):
+                bot.reply_to(message, "❌ Currently disabled.")
+                return
+            dy = 7
+            d = re.search(r'(\d{1,2})\s*(?:din|days)', lo)
+            if d:
+                dy = int(d.group(1))
+            wb = "bar" in lo or "column" in lo
+            wp = "pie" in lo or "share" in lo or "distribution" in lo
+            wl = "line" in lo or "trend" in lo
+            mtd = "mtd" in lo
+            wa = any(w in lo for w in ["sabhi", "full", "teeno", "all", "sab", "sare"])
+            bot.send_message(message.chat.id, "⏳ Graph ban raha hai...")
+            if wa:
+                ts = ["bar", "pie", "line"]
+            elif wb and wp:
+                ts = ["bar", "pie"]
+            elif wb and wl:
+                ts = ["bar", "line"]
+            elif wp and wl:
+                ts = ["pie", "line"]
+            elif wp:
+                ts = ["pie"]
+            elif wl:
+                ts = ["line"]
+            else:
+                ts = ["bar"]
+            for t in ts:
+                try:
+                    if t == "bar":
+                        u = bar_chart(dy, mtd=mtd)
+                    elif t == "pie":
+                        u = pie_chart(dy, mtd=mtd)
+                    else:
+                        u = line_chart(dy, mtd=mtd)
+                    bot.send_photo(message.chat.id, u)
+                    time.sleep(1)
+                except Exception as ge:
+                    bot.send_message(message.chat.id, f"Graph error ({t}): {str(ge)}")
+            return
+
+        # ===== SUMMARIES =====
+        if "weekly" in lo or "hafte ka summary" in lo or "hafte ki summary" in lo:
+            if not check_perm("weekly_summary", adm):
+                bot.reply_to(message, "❌ Currently disabled.")
+                return
+            bot.reply_to(message, weekly_sum())
+            try:
+                bot.send_photo(message.chat.id, line_chart(7))
+            except:
+                pass
+            return
+
+        if "monthly" in lo or "mahine ka summary" in lo or "mahine ki summary" in lo:
+            if not check_perm("weekly_summary", adm):
+                bot.reply_to(message, "❌ Currently disabled.")
+                return
+            bot.reply_to(message, monthly_sum())
+            try:
+                bot.send_photo(message.chat.id, line_chart(mtd=True))
+            except:
+                pass
+            return
+
+        # ===== COMPARE =====
+        if any(w in lo for w in ["compare", "farq", "antar", "difference"]):
+            if not check_perm("compare", adm):
+                bot.reply_to(message, "❌ Currently disabled.")
+                return
+            parts = re.split(r'\baur\b|\bor\b|\bya\b|\band\b|\bvs\b|\bse\b', lo)
+            an = []
+            for p in parts:
+                t = ext_time(p)
+                d = ext_date(p)
+                if t or d:
+                    an.append((d, t))
+            if len(an) >= 2:
+                a1, a2 = an[0], an[1]
+                d1 = a1[0] or (datetime.now().date() - timedelta(days=1))
+                d2 = a2[0] or datetime.now().date()
+                t1 = a1[1] or (12, 0)
+                t2 = a2[1] or (12, 0)
+                r1 = find_rep(d1, t1[0], t1[1])
+                r2 = find_rep(d2, t2[0], t2[1])
+                if not r1:
+                    bot.reply_to(message, f"❌ {d1.strftime('%d %b')} {t1[0]:02d}:{t1[1]:02d} ke aas-paas koi MNP report nahi mili.")
+                    return
+                if not r2:
+                    bot.reply_to(message, f"❌ {d2.strftime('%d %b')} {t2[0]:02d}:{t2[1]:02d} ke aas-paas koi MNP report nahi mili.")
+                    return
+                l1 = f"{d1.strftime('%d %b')} {t1[0]:02d}:{t1[1]:02d}"
+                l2 = f"{d2.strftime('%d %b')} {t2[0]:02d}:{t2[1]:02d}"
+                bot.reply_to(message, cmp_text(r1, r2, l1, l2))
+                return
+            lt = list(get_db().find({"text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", -1).limit(2))
+            if len(lt) >= 2:
+                bot.reply_to(message, cmp_text(lt[1], lt[0]))
+                return
+            bot.reply_to(message, "❌ Database mein kam se kam 2 MNP reports chahiye.")
+            return
+
+        # ===== AI FALLBACK =====
+        r = client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": "You are a helpful Telegram assistant. Reply in same language. Answer in 1-3 lines."},
+                {"role": "user", "content": ct}
+            ], model="openai/gpt-oss-20b")
+        bot.reply_to(message, r.choices[0].message.content)
+    except Exception as e:
+        try:
+            bot.reply_to(message, "Error: " + str(e))
+        except:
+            pass
+
+
+
+# ==================== WELCOME MESSAGE ====================
 @bot.message_handler(content_types=['new_chat_members'])
 def welcome_new_member(message):
     try:
@@ -1820,13 +2212,14 @@ def welcome_new_member(message):
                 "🎉 Welcome to DTR Mainpuri Group!\n\n"
                 f"👋 Hello {name} Sir!\n"
                 "🤝 Aapka swagat hai!\n\n"
-                "🤵 Mai hu Akash Sir ka Assistant Report's\n\n"
+                "🤵 Mai hu Akash Sir ka Assistant\n\n"
                 "📊 Aapki kisi bhi madad ke liye main yahi hoon —\n"
                 "mujhe bulane ke liye tag karke /menu bhejen"
             )
             bot.send_message(message.chat.id, welcome_text)
     except Exception as e:
         print("Welcome error:", str(e))
+
 
 BTN_MAP = {
     "graph_bar": "graphs", "graph_pie": "graphs", "graph_line": "graphs",
@@ -2035,7 +2428,7 @@ def cb(call):
         elif d == "perf_check":
             bot.send_message(cid, perf_alert())
 
-        # ===== MOM, BEST/WORST (Admin Only) =====
+        # ===== MOM, BEST/WORST =====
         elif d == "mom_compare":
             bot.send_message(cid, mom_compare())
         elif d == "best_worst":
