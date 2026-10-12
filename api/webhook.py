@@ -1250,19 +1250,19 @@ def handle(message):
                 return
             from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
             kb = InlineKeyboardMarkup(row_width=2)
-            kb.add(
+             kb.add(
                 InlineKeyboardButton("📊 Graphs", callback_data="menu_graphs"),
                 InlineKeyboardButton("📈 Projection", callback_data="menu_proj"),
                 InlineKeyboardButton("🎯 Performance", callback_data="menu_perf"),
                 InlineKeyboardButton("🚨 Stock Check", callback_data="stock_check"),
                 InlineKeyboardButton("⚖️ Distributors", callback_data="dist_compare"),
                 InlineKeyboardButton("📋 Weekly Summary", callback_data="weekly_summary"),
-                InlineKeyboardButton("📅 Month vs Month", callback_data="mom_compare"),
-                InlineKeyboardButton("🏆 Best/Worst", callback_data="best_worst"),
-                InlineKeyboardButton("📊 Distributor Charts", callback_data="menu_dist"),
             )
             if adm:
                 kb.add(
+                    InlineKeyboardButton("📅 Month vs Month", callback_data="mom_compare"),
+                    InlineKeyboardButton("🏆 Best/Worst", callback_data="best_worst"),
+                    InlineKeyboardButton("📊 Distributor Charts", callback_data="menu_dist"),
                     InlineKeyboardButton("🏆 Peak Hours", callback_data="peak_hours"),
                     InlineKeyboardButton("🎯 Target Status", callback_data="tgt_status"),
                 )
@@ -1688,12 +1688,12 @@ def build_main_menu_kb(adm):
         InlineKeyboardButton("🚨 Stock Check", callback_data="stock_check"),
         InlineKeyboardButton("⚖️ Distributors", callback_data="dist_compare"),
         InlineKeyboardButton("📋 Weekly Summary", callback_data="weekly_summary"),
-        InlineKeyboardButton("📅 Month vs Month", callback_data="mom_compare"),
-        InlineKeyboardButton("🏆 Best/Worst", callback_data="best_worst"),
-        InlineKeyboardButton("📊 Distributor Charts", callback_data="menu_dist"),
     )
     if adm:
         kb.add(
+            InlineKeyboardButton("📅 Month vs Month", callback_data="mom_compare"),
+            InlineKeyboardButton("🏆 Best/Worst", callback_data="best_worst"),
+            InlineKeyboardButton("📊 Distributor Charts", callback_data="menu_dist"),
             InlineKeyboardButton("🏆 Peak Hours", callback_data="peak_hours"),
             InlineKeyboardButton("🎯 Target Status", callback_data="tgt_status"),
         )
