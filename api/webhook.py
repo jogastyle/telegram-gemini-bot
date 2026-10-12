@@ -150,6 +150,8 @@ def parse_mnp(t):
     tm = TOT_P.search(t)
     if tm:
         total = {"jio": int(tm.group(1)), "vi": int(tm.group(2)), "other": int(tm.group(3)), "total": int(tm.group(4))}
+    if not dists and not total:
+        return None
     rtm = TIME_P.search(t)
     rtime = f"{int(rtm.group(1)):02d}:{rtm.group(2)}" if rtm else None
     return {"distributors": dists, "total": total, "report_time": rtime}
@@ -1243,6 +1245,22 @@ def debug_ftd():
             out.append(f"Total: {parsed.get('total')}")
             out.append("---")
         return "<pre>" + "\n".join(out) + "</pre>", 200
+    except Exception as e:
+        return "Error: " + str(e), 500
+
+@app.route('/cleanup-bad', methods=['GET'])
+def cleanup_bad():
+    try:
+        db = get_db()
+        all_reps = list(db.find({}))
+        deleted = 0
+        for r in all_reps:
+            text = r.get("text", "")
+            if "FTD" in text and "FTA MNP" not in text:
+                if not parse_mnp(text):
+                    db.delete_one({"_id": r["_id"]})
+                    deleted += 1
+        return f"Deleted {deleted} bad entries", 200
     except Exception as e:
         return "Error: " + str(e), 500
 @bot.message_handler(func=lambda m: True)
