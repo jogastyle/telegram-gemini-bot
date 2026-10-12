@@ -8,7 +8,7 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 GROQ_KEY = os.environ.get("GROQ_KEY")
 MONGO_URL = os.environ.get("MONGO_URL")
 GROUP_CHAT_ID = "-1004368616206"
-SR_GROUPS = ["-5276657355", "-5578221329"]
+DEFAULT_SR_GROUPS = ["-5276657355", "-5578221329", "-5474470195", "-5327059513"]
 BOT_USERNAME = "@DTR_Mainpuri_Bot"
 IST = 5 * 3600 + 30 * 60
 
@@ -40,8 +40,32 @@ def get_settings():
 def upd_setting(k, v):
     get_db().update_one({"_id": "settings"}, {"$set": {k: v}}, upsert=True)
 
+def get_sr_groups():
+    s = get_settings()
+    groups = s.get("sr_groups")
+    if groups is None:
+        upd_setting("sr_groups", DEFAULT_SR_GROUPS)
+        return DEFAULT_SR_GROUPS
+    return groups
+
+def add_sr_group(gid):
+    groups = get_sr_groups()
+    if gid not in groups:
+        groups.append(gid)
+        upd_setting("sr_groups", groups)
+        return True
+    return False
+
+def remove_sr_group(gid):
+    groups = get_sr_groups()
+    if gid in groups:
+        groups.remove(gid)
+        upd_setting("sr_groups", groups)
+        return True
+    return False
+
 def send_to_sr_groups(msg):
-    for gid in SR_GROUPS:
+    for gid in get_sr_groups():
         try:
             bot.send_message(gid, msg)
         except Exception as e:
@@ -392,8 +416,7 @@ def peak_hours(days=7):
         day_hours = set()
         for r in rr:
             p = r.get("parsed") or parse_mnp(r.get("text", ""))
-            if not p:
-                continue
+            if not p: continue
             ct = (p.get("total") or {}).get("total", 0)
             if prev > 0 and prev_ts is not None:
                 d = ct - prev
@@ -438,8 +461,7 @@ def peak_hour_for_date(target_date):
     prev_ts = None
     for r in reps:
         p = r.get("parsed") or parse_mnp(r.get("text", ""))
-        if not p:
-            continue
+        if not p: continue
         ct = (p.get("total") or {}).get("total", 0)
         if prev > 0 and prev_ts is not None:
             d = ct - prev
@@ -469,6 +491,7 @@ def peak_hour_for_date(target_date):
         lines.append("")
         lines.append(f"📊 Best hour: {best_h:02d}:00-{best_h+1:02d}:00 ({best_c} MNP)")
     return "\n".join(lines)
+
 def weekly_sum():
     d = daily_data(7)
     dt = d["dist_totals"]
@@ -1166,7 +1189,7 @@ def report_missing():
 def handle(message):
     try:
         # ===== SR GROUPS ME KOL REPLY NAHI =====
-        if str(message.chat.id) in SR_GROUPS:
+        if str(message.chat.id) in get_sr_groups():
             return
         
         text = message.text or ""
@@ -1195,6 +1218,49 @@ def handle(message):
         uid = message.from_user.id
         un = message.from_user.username
         adm = is_admin(uid, un)
+
+        # ===== SR GROUP MANAGEMENT (Admin Only) =====
+        if lo.startswith("sr add "):
+            if not adm:
+                bot.reply_to(message, "❌ Sirf admin.")
+                return
+            gid = lo.replace("sr add ", "").strip()
+            if not gid.startswith("-"):
+                bot.reply_to(message, "❌ Group ID `-` se shuru honi chahiye.\n\nJaise: `sr add -1234567890`", parse_mode="Markdown")
+                return
+            if add_sr_group(gid):
+                bot.reply_to(message, f"✅ SR group added: `{gid}`\n\nTotal groups: {len(get_sr_groups())}", parse_mode="Markdown")
+            else:
+                bot.reply_to(message, f"⚠️ Group already exists: `{gid}`", parse_mode="Markdown")
+            return
+
+        if lo.startswith("sr remove "):
+            if not adm:
+                bot.reply_to(message, "❌ Sirf admin.")
+                return
+            gid = lo.replace("sr remove ", "").strip()
+            if remove_sr_group(gid):
+                bot.reply_to(message, f"✅ SR group removed: `{gid}`\n\nBaaki groups: {len(get_sr_groups())}", parse_mode="Markdown")
+            else:
+                bot.reply_to(message, f"⚠️ Group nahi mila: `{gid}`", parse_mode="Markdown")
+            return
+
+        if lo.strip() in ["sr list", "sr groups", "sr group list"]:
+            if not adm:
+                bot.reply_to(message, "❌ Sirf admin.")
+                return
+            groups = get_sr_groups()
+            if not groups:
+                bot.reply_to(message, "❌ Koi SR group nahi hai.\n\nAdd karne ke liye: `sr add -1234567890`", parse_mode="Markdown")
+                return
+            lines = [f"📋 SR Groups ({len(groups)})", ""]
+            for i, g in enumerate(groups, 1):
+                lines.append(f"{i}. `{g}`")
+            lines.append("")
+            lines.append("Add: `sr add -1234567890`")
+            lines.append("Remove: `sr remove -1234567890`")
+            bot.reply_to(message, "\n".join(lines), parse_mode="Markdown")
+            return
 
         # SAVE AS COMMAND
         savem = re.search(r'save\s+as\s+(\d{1,2})\s*([a-z]+)\s*(\d{1,2})(?::(\d{2}))?', lo)
@@ -1250,7 +1316,7 @@ def handle(message):
                 return
             from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
             kb = InlineKeyboardMarkup(row_width=2)
-             kb.add(
+            kb.add(
                 InlineKeyboardButton("📊 Graphs", callback_data="menu_graphs"),
                 InlineKeyboardButton("📈 Projection", callback_data="menu_proj"),
                 InlineKeyboardButton("🎯 Performance", callback_data="menu_perf"),
@@ -1269,7 +1335,7 @@ def handle(message):
             bot.reply_to(message, "🤖 DTR Mainpuri Bot Menu\n\nKya dekhna chahte ho?", reply_markup=kb)
             return
 
-        
+
         # ===== DISTRIBUTOR-SPECIFIC CHARTS =====
         dcm = re.search(r'\b(uday|mv|vaishno|maa\s*vaishno)\b.*\b(bar|line|pie)\b', lo)
         if dcm and ("chart" in lo or "graph" in lo or dcm.start() == 0 or lo.strip().startswith(dcm.group(1))):
@@ -1665,7 +1731,7 @@ def handle(message):
         except:
             pass
 
-        
+
 
 BTN_MAP = {
     "graph_bar": "graphs", "graph_pie": "graphs", "graph_line": "graphs",
@@ -1768,8 +1834,11 @@ def cb(call):
                 bot.send_message(cid, "🎯 Performance Menu", reply_markup=kb)
             return
 
-        # ===== SUBMENU: DISTRIBUTOR CHARTS =====
+        # ===== SUBMENU: DISTRIBUTOR CHARTS (Admin Only) =====
         if d == "menu_dist":
+            if not adm:
+                bot.send_message(cid, "❌ Sirf admin ke liye.")
+                return
             kb = InlineKeyboardMarkup(row_width=3)
             kb.add(InlineKeyboardButton("🔵 UDAY COMM AGR", callback_data="noop"))
             kb.add(
@@ -1812,6 +1881,11 @@ def cb(call):
                 bot.send_message(cid, "🤖 Main Menu\n\nKya dekhna chahte ho?", reply_markup=kb)
             return
 
+        # ===== Admin-only callbacks protection =====
+        if d in ["mom_compare", "best_worst", "menu_dist"] and not adm:
+            bot.send_message(cid, "❌ Sirf admin ke liye.")
+            return
+
         # ===== Permission check =====
         pk = BTN_MAP.get(d)
         if pk and not check_perm(pk, adm):
@@ -1820,6 +1894,9 @@ def cb(call):
 
         # ===== DISTRIBUTOR CHARTS =====
         if d and d.startswith("dist_") and d != "dist_compare":
+            if not adm:
+                bot.send_message(cid, "❌ Sirf admin ke liye.")
+                return
             parts = d.replace("dist_", "").split("_")
             dist = parts[0]
             mtd = False
@@ -1863,7 +1940,7 @@ def cb(call):
         elif d == "perf_check":
             bot.send_message(cid, perf_alert())
 
-        # ===== MOM, BEST/WORST =====
+        # ===== MOM, BEST/WORST (Admin Only) =====
         elif d == "mom_compare":
             bot.send_message(cid, mom_compare())
         elif d == "best_worst":
