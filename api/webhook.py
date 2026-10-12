@@ -1086,20 +1086,47 @@ def chk_perf():
         return "Error: " + str(e), 500
 
 @app.route('/daily-quote', methods=['GET'])
+MOTIVATION_THEMES = [
+    "teamwork aur ekta",
+    "mehnat aur lagan",
+    "kabhi haar nahi maanna",
+    "safalta aur tarakki",
+    "consistency aur sabr",
+    "himmat aur sahas",
+    "galtiyon se seekhna",
+    "chhote kadam, bade sapne",
+    "positive soch",
+    "ek dusre ki madad",
+    "focus aur anushasan",
+    "samay ka sahi upyog",
+    "netritva aur zimmedari",
+    "vishwas aur imaandari",
+    "tyaag aur inaam",
+    "naye din ki shuruat",
+    "khushi aur safalta",
+    "doston ka saath",
+    "mann lagakar kaam",
+    "himmat se aage badhna"
+]
+
+@app.route('/daily-quote', methods=['GET'])
 def daily_quote():
     try:
         bot.send_message(GROUP_CHAT_ID, "🌅 Good Morning Team")
         time.sleep(1)
+        import random
+        today = datetime.now().strftime("%d %B %Y")
+        day_name = datetime.now().strftime("%A")
+        theme = random.choice(MOTIVATION_THEMES)
         r = client.chat.completions.create(
             messages=[
-                {"role": "system", "content": "Generate a work-related motivational message in Hindi (Devanagari script). 2-3 lines. About teamwork, hard work, success. No greeting. No author name."},
-                {"role": "user", "content": "Give me today's motivational message."}
+                {"role": "system", "content": "You are a creative Hindi motivational writer. Write ONLY in Devanagari script. Write exactly 2-3 lines. NO greeting, NO author name, NO English words, NO theme mention. Every message must be UNIQUE and FRESH - never repeat previous lines. Be creative."},
+                {"role": "user", "content": f"Aaj {day_name}, {today} hai. Theme: {theme}. Is theme par ek BILKUL NAYA 2-3 line ka motivational message likho jo pehle kabhi use na hua ho. Koi purani line repeat mat karna. Fresh and unique message do."}
             ], model="openai/gpt-oss-20b")
         bot.send_message(GROUP_CHAT_ID, "💪 " + r.choices[0].message.content.strip())
         return "Sent", 200
     except Exception as e:
         return "Error: " + str(e), 500
-
 @app.route('/weekly-summary', methods=['GET'])
 def weekly_ep():
     try:
