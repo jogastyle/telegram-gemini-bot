@@ -388,19 +388,22 @@ def peak_hours(days=7):
     hr_days = {}
     for k, rr in bd.items():
         prev = 0
+        prev_ts = None
         day_hours = set()
         for r in rr:
             p = r.get("parsed") or parse_mnp(r.get("text", ""))
-            if not p: continue
+            if not p:
+                continue
             ct = (p.get("total") or {}).get("total", 0)
-            if prev > 0:
+            if prev > 0 and prev_ts is not None:
                 d = ct - prev
                 if d > 0:
-                    h = datetime.fromtimestamp(r["timestamp"] + IST).hour
+                    h = datetime.fromtimestamp(prev_ts + IST).hour
                     if ws_h <= h < we_h:
                         hr_total[h] = hr_total.get(h, 0) + d
                         day_hours.add(h)
             prev = ct
+            prev_ts = r["timestamp"]
         for h in day_hours:
             hr_days[h] = hr_days.get(h, 0) + 1
     if not hr_total:
@@ -432,17 +435,20 @@ def peak_hour_for_date(target_date):
         return f"❌ {target_date.strftime('%d %b')} ko koi MNP report nahi aayi."
     hr = {}
     prev = 0
+    prev_ts = None
     for r in reps:
         p = r.get("parsed") or parse_mnp(r.get("text", ""))
-        if not p: continue
+        if not p:
+            continue
         ct = (p.get("total") or {}).get("total", 0)
-        if prev > 0:
+        if prev > 0 and prev_ts is not None:
             d = ct - prev
             if d > 0:
-                h = datetime.fromtimestamp(r["timestamp"] + IST).hour
+                h = datetime.fromtimestamp(prev_ts + IST).hour
                 if ws_h <= h < we_h:
                     hr[h] = hr.get(h, 0) + d
         prev = ct
+        prev_ts = r["timestamp"]
     if not hr:
         return f"❌ {target_date.strftime('%d %b')} ko working hours (7 AM - 9 PM) me koi data nahi."
     sh = sorted(hr.items(), key=lambda x: -x[1])
@@ -463,7 +469,6 @@ def peak_hour_for_date(target_date):
         lines.append("")
         lines.append(f"📊 Best hour: {best_h:02d}:00-{best_h+1:02d}:00 ({best_c} MNP)")
     return "\n".join(lines)
-
 def weekly_sum():
     d = daily_data(7)
     dt = d["dist_totals"]
