@@ -371,6 +371,99 @@ def dist_chart(dist, ctype="bar", days=7, mtd=False):
             "formatter": "function(v){return v;}"}}}}
     return qc(cfg)
 
+def peak_hours(days=7):
+    now = datetime.now()
+    ws_h = 7
+    we_h = 21
+    s = now - timedelta(days=days-1)
+    us = s.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() - IST
+    reps = list(get_db().find({"timestamp": {"$gte": us}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", 1))
+    if not reps:
+        return "❌ Koi report nahi mili."
+    bd = {}
+    for r in reps:
+        k = time.strftime("%Y-%m-%d", time.gmtime(r["timestamp"] + IST))
+        bd.setdefault(k, []).append(r)
+    hr_total = {}
+    hr_days = {}
+    for k, rr in bd.items():
+        prev = 0
+        day_hours = set()
+        for r in rr:
+            p = r.get("parsed") or parse_mnp(r.get("text", ""))
+            if not p: continue
+            ct = (p.get("total") or {}).get("total", 0)
+            if prev > 0:
+                d = ct - prev
+                if d > 0:
+                    h = datetime.fromtimestamp(r["timestamp"] + IST).hour
+                    if ws_h <= h < we_h:
+                        hr_total[h] = hr_total.get(h, 0) + d
+                        day_hours.add(h)
+            prev = ct
+        for h in day_hours:
+            hr_days[h] = hr_days.get(h, 0) + 1
+    if not hr_total:
+        return "❌ Working hours (7 AM - 9 PM) me koi data nahi mila."
+    combined = []
+    for h, tot in hr_total.items():
+        active_days = hr_days.get(h, 1)
+        avg = int(tot / active_days) if active_days else 0
+        combined.append((h, tot, avg, active_days))
+    combined.sort(key=lambda x: -x[2])
+    top5 = combined[:5]
+    lines = [f"🕐 Peak Hours (Last {days} Days)", f"⏰ 7:00 AM - 9:00 PM", ""]
+    for i, (h, tot, avg, ad) in enumerate(top5, 1):
+        medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "•"
+        lines.append(f"{medal} {h:02d}:00 - {h+1:02d}:00 → avg {avg} MNP")
+    if top5:
+        best_h, best_tot, best_avg, _ = top5[0]
+        lines.append("")
+        lines.append(f"📊 Sabse zyada business: {best_h:02d}:00-{best_h+1:02d}:00 (avg {best_avg}/din)")
+    return "\n".join(lines)
+
+def peak_hour_for_date(target_date):
+    ws_h = 7
+    we_h = 21
+    s = datetime.combine(target_date, datetime.min.time()).timestamp() - IST
+    e = s + 86400
+    reps = list(get_db().find({"timestamp": {"$gte": s, "$lt": e}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", 1))
+    if not reps:
+        return f"❌ {target_date.strftime('%d %b')} ko koi MNP report nahi aayi."
+    hr = {}
+    prev = 0
+    for r in reps:
+        p = r.get("parsed") or parse_mnp(r.get("text", ""))
+        if not p: continue
+        ct = (p.get("total") or {}).get("total", 0)
+        if prev > 0:
+            d = ct - prev
+            if d > 0:
+                h = datetime.fromtimestamp(r["timestamp"] + IST).hour
+                if ws_h <= h < we_h:
+                    hr[h] = hr.get(h, 0) + d
+        prev = ct
+    if not hr:
+        return f"❌ {target_date.strftime('%d %b')} ko working hours (7 AM - 9 PM) me koi data nahi."
+    sh = sorted(hr.items(), key=lambda x: -x[1])
+    day_label = target_date.strftime('%d %b %Y')
+    today = datetime.now().date()
+    if target_date == today:
+        day_label = "Aaj"
+    elif target_date == today - timedelta(days=1):
+        day_label = "Kal"
+    elif target_date == today - timedelta(days=2):
+        day_label = "Parso"
+    lines = [f"🕐 Peak Hour — {day_label} ({target_date.strftime('%d %b %Y')})", f"⏰ 7:00 AM - 9:00 PM", ""]
+    for i, (h, c) in enumerate(sh[:5], 1):
+        medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "•"
+        lines.append(f"{medal} {h:02d}:00 - {h+1:02d}:00 → {c} MNP")
+    if sh:
+        best_h, best_c = sh[0]
+        lines.append("")
+        lines.append(f"📊 Best hour: {best_h:02d}:00-{best_h+1:02d}:00 ({best_c} MNP)")
+    return "\n".join(lines)
+
 def weekly_sum():
     d = daily_data(7)
     dt = d["dist_totals"]
@@ -702,99 +795,6 @@ def proj_till(dy, mon_num):
     t_exp = u_exp + m_exp
     target_str = target_date.strftime("%d %b")
     lines = [f"📈 Projection till {target_str}", "", f"Aaj tak ({dd} din):", f"🔵 Uday: {u_sofar}", f"🔴 Maa Vaishno: {m_sofar}", f"🎯 Total: {t_sofar}", "", f"📈 Expected till {target_str} ({days_until} din baaki):", f"🔵 Uday: ~{u_exp}", f"🔴 Maa Vaishno: ~{m_exp}", f"🎯 Total: ~{t_exp}"]
-    return "\n".join(lines)
-
-def peak_hours(days=7):
-    now = datetime.now()
-    ws_h = 7
-    we_h = 21
-    s = now - timedelta(days=days-1)
-    us = s.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() - IST
-    reps = list(get_db().find({"timestamp": {"$gte": us}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", 1))
-    if not reps:
-        return "❌ Koi report nahi mili."
-    bd = {}
-    for r in reps:
-        k = time.strftime("%Y-%m-%d", time.gmtime(r["timestamp"] + IST))
-        bd.setdefault(k, []).append(r)
-    hr_total = {}
-    hr_days = {}
-    for k, rr in bd.items():
-        prev = 0
-        day_hours = set()
-        for r in rr:
-            p = r.get("parsed") or parse_mnp(r.get("text", ""))
-            if not p: continue
-            ct = (p.get("total") or {}).get("total", 0)
-            if prev > 0:
-                d = ct - prev
-                if d > 0:
-                    h = datetime.fromtimestamp(r["timestamp"] + IST).hour
-                    if ws_h <= h < we_h:
-                        hr_total[h] = hr_total.get(h, 0) + d
-                        day_hours.add(h)
-            prev = ct
-        for h in day_hours:
-            hr_days[h] = hr_days.get(h, 0) + 1
-    if not hr_total:
-        return "❌ Working hours (7 AM - 9 PM) me koi data nahi mila."
-    combined = []
-    for h, tot in hr_total.items():
-        active_days = hr_days.get(h, 1)
-        avg = int(tot / active_days) if active_days else 0
-        combined.append((h, tot, avg, active_days))
-    combined.sort(key=lambda x: -x[2])
-    top5 = combined[:5]
-    lines = [f"🕐 Peak Hours (Last {days} Days)", f"⏰ 7:00 AM - 9:00 PM", ""]
-    for i, (h, tot, avg, ad) in enumerate(top5, 1):
-        medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "•"
-        lines.append(f"{medal} {h:02d}:00 - {h+1:02d}:00 → avg {avg} MNP")
-    if top5:
-        best_h, best_tot, best_avg, _ = top5[0]
-        lines.append("")
-        lines.append(f"📊 Sabse zyada business: {best_h:02d}:00-{best_h+1:02d}:00 (avg {best_avg}/din)")
-    return "\n".join(lines)
-
-def peak_hour_for_date(target_date):
-    ws_h = 7
-    we_h = 21
-    s = datetime.combine(target_date, datetime.min.time()).timestamp() - IST
-    e = s + 86400
-    reps = list(get_db().find({"timestamp": {"$gte": s, "$lt": e}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", 1))
-    if not reps:
-        return f"❌ {target_date.strftime('%d %b')} ko koi MNP report nahi aayi."
-    hr = {}
-    prev = 0
-    for r in reps:
-        p = r.get("parsed") or parse_mnp(r.get("text", ""))
-        if not p: continue
-        ct = (p.get("total") or {}).get("total", 0)
-        if prev > 0:
-            d = ct - prev
-            if d > 0:
-                h = datetime.fromtimestamp(r["timestamp"] + IST).hour
-                if ws_h <= h < we_h:
-                    hr[h] = hr.get(h, 0) + d
-        prev = ct
-    if not hr:
-        return f"❌ {target_date.strftime('%d %b')} ko working hours (7 AM - 9 PM) me koi data nahi."
-    sh = sorted(hr.items(), key=lambda x: -x[1])
-    day_label = target_date.strftime('%d %b %Y')
-    today = datetime.now().date()
-    if target_date == today:
-        day_label = "Aaj"
-    elif target_date == today - timedelta(days=1):
-        day_label = "Kal"
-    elif target_date == today - timedelta(days=2):
-        day_label = "Parso"
-    lines = [f"🕐 Peak Hour — {day_label} ({target_date.strftime('%d %b %Y')})", f"⏰ 7:00 AM - 9:00 PM", ""]
-    for i, (h, c) in enumerate(sh[:5], 1):
-        medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "•"
-        lines.append(f"{medal} {h:02d}:00 - {h+1:02d}:00 → {c} MNP")
-    if sh:
-        best_h, best_c = sh[0]
-        lines.append("")
-        lines.append(f"📊 Best hour: {best_h:02d}:00-{best_h+1:02d}:00 ({best_c} MNP)")
     return "\n".join(lines)
 
 def growth(period="week"):
@@ -1160,6 +1160,10 @@ def report_missing():
 @bot.message_handler(func=lambda m: True)
 def handle(message):
     try:
+        # ===== SR GROUPS ME KOL REPLY NAHI =====
+        if str(message.chat.id) in SR_GROUPS:
+            return
+        
         text = message.text or ""
         msg_ts = message.date
         if message.chat.id == int(GROUP_CHAT_ID) and ("FTA MNP" in text or "FTD" in text):
@@ -1234,6 +1238,7 @@ def handle(message):
             bot.reply_to(message, f"{r}\n\nUsername: @{un or 'not set'}\nUser ID: {uid}")
             return
 
+        # ===== MENU =====
         if lo.strip() in ["/start", "/menu", "menu", "start", "help", "commands"]:
             if not check_perm("menu", adm):
                 bot.reply_to(message, "❌ Menu currently disabled hai.")
@@ -1259,7 +1264,7 @@ def handle(message):
             bot.reply_to(message, "🤖 DTR Mainpuri Bot Menu\n\nKya dekhna chahte ho?", reply_markup=kb)
             return
 
-
+        
         # ===== DISTRIBUTOR-SPECIFIC CHARTS =====
         dcm = re.search(r'\b(uday|mv|vaishno|maa\s*vaishno)\b.*\b(bar|line|pie)\b', lo)
         if dcm and ("chart" in lo or "graph" in lo or dcm.start() == 0 or lo.strip().startswith(dcm.group(1))):
@@ -1300,6 +1305,42 @@ def handle(message):
             if d:
                 dy = int(d.group(1))
             bot.reply_to(message, best_worst(dy))
+            return
+
+        # ===== PEAK HOURS =====
+        if any(w in lo for w in ["peak hour", "peak hours", "peak time", "kis time sabse zyada"]):
+            if not check_perm("peak_hours", adm):
+                bot.reply_to(message, "❌ Currently disabled.")
+                return
+            day_found = None
+            if "kal" in lo or "yesterday" in lo:
+                day_found = datetime.now().date() - timedelta(days=1)
+            elif "aaj" in lo or "today" in lo:
+                day_found = datetime.now().date()
+            elif "parso" in lo:
+                day_found = datetime.now().date() - timedelta(days=2)
+            else:
+                dm = re.search(r'(\d{1,2})\s*([a-z]{3,9})', lo)
+                if dm:
+                    try:
+                        dyy = int(dm.group(1))
+                        mstr = dm.group(2).lower()[:3]
+                        if mstr in MON and 1 <= dyy <= 31:
+                            yr = datetime.now().year
+                            cand = datetime(yr, MON[mstr], dyy).date()
+                            if cand > datetime.now().date():
+                                cand = datetime(yr-1, MON[mstr], dyy).date()
+                            day_found = cand
+                    except:
+                        pass
+            if day_found:
+                bot.reply_to(message, peak_hour_for_date(day_found))
+                return
+            dy = 7
+            d = re.search(r'(\d{1,2})\s*(?:din|days)', lo)
+            if d:
+                dy = int(d.group(1))
+            bot.reply_to(message, peak_hours(dy))
             return
 
         # ===== WORKING HOURS =====
@@ -1390,42 +1431,6 @@ def handle(message):
                 return
             upd_setting("stock_threshold", int(stm.group(1)))
             bot.reply_to(message, f"✅ Stock alert threshold set: {stm.group(1)} din")
-            return
-
-        # ===== PEAK HOURS =====
-              if any(w in lo for w in ["peak hour", "peak hours", "peak time", "kis time sabse zyada"]):
-            if not check_perm("peak_hours", adm):
-                bot.reply_to(message, "❌ Currently disabled.")
-                return
-            day_found = None
-            if "kal" in lo or "yesterday" in lo:
-                day_found = datetime.now().date() - timedelta(days=1)
-            elif "aaj" in lo or "today" in lo:
-                day_found = datetime.now().date()
-            elif "parso" in lo:
-                day_found = datetime.now().date() - timedelta(days=2)
-            else:
-                dm = re.search(r'(\d{1,2})\s*([a-z]{3,9})', lo)
-                if dm:
-                    try:
-                        dyy = int(dm.group(1))
-                        mstr = dm.group(2).lower()[:3]
-                        if mstr in MON and 1 <= dyy <= 31:
-                            yr = datetime.now().year
-                            cand = datetime(yr, MON[mstr], dyy).date()
-                            if cand > datetime.now().date():
-                                cand = datetime(yr-1, MON[mstr], dyy).date()
-                            day_found = cand
-                    except:
-                        pass
-            if day_found:
-                bot.reply_to(message, peak_hour_for_date(day_found))
-                return
-            dy = 7
-            d = re.search(r'(\d{1,2})\s*(?:din|days)', lo)
-            if d:
-                dy = int(d.group(1))
-            bot.reply_to(message, peak_hours(dy))
             return
 
         # ===== GROWTH =====
@@ -1655,7 +1660,7 @@ def handle(message):
         except:
             pass
 
-
+        
 
 BTN_MAP = {
     "graph_bar": "graphs", "graph_pie": "graphs", "graph_line": "graphs",
@@ -1702,7 +1707,7 @@ def cb(call):
         adm = is_admin(uid, un)
         from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-        # ===== SUBMENU: GRAPHS (same message edit) =====
+        # ===== SUBMENU: GRAPHS =====
         if d == "menu_graphs":
             kb = InlineKeyboardMarkup(row_width=3)
             kb.add(
@@ -1722,7 +1727,7 @@ def cb(call):
                 bot.send_message(cid, "📊 Graphs Menu\n\nKaunsa graph chahiye?", reply_markup=kb)
             return
 
-        # ===== SUBMENU: PROJECTION (same message edit) =====
+        # ===== SUBMENU: PROJECTION =====
         if d == "menu_proj":
             if not check_perm("projections", adm):
                 bot.send_message(cid, "❌ Currently disabled hai.")
@@ -1740,7 +1745,7 @@ def cb(call):
                 bot.send_message(cid, "📈 Projection Menu", reply_markup=kb)
             return
 
-        # ===== SUBMENU: PERFORMANCE (same message edit) =====
+        # ===== SUBMENU: PERFORMANCE =====
         if d == "menu_perf":
             if not check_perm("performance", adm):
                 bot.send_message(cid, "❌ Currently disabled hai.")
@@ -1758,7 +1763,7 @@ def cb(call):
                 bot.send_message(cid, "🎯 Performance Menu", reply_markup=kb)
             return
 
-        # ===== SUBMENU: DISTRIBUTOR CHARTS (same message edit) =====
+        # ===== SUBMENU: DISTRIBUTOR CHARTS =====
         if d == "menu_dist":
             kb = InlineKeyboardMarkup(row_width=3)
             kb.add(InlineKeyboardButton("🔵 UDAY COMM AGR", callback_data="noop"))
@@ -1793,7 +1798,7 @@ def cb(call):
         if d == "noop":
             return
 
-        # ===== BACK TO MAIN MENU (same message edit) =====
+        # ===== BACK TO MAIN MENU =====
         if d == "menu_main":
             kb = build_main_menu_kb(adm)
             try:
