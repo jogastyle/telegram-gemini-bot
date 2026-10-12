@@ -64,6 +64,12 @@ def remove_sr_group(gid):
         return True
     return False
 
+def sr_ai_enabled():
+    return get_settings().get("sr_ai_enabled", False)
+
+def set_sr_ai(state):
+    upd_setting("sr_ai_enabled", state)
+
 def send_to_sr_groups(msg):
     for gid in get_sr_groups():
         try:
@@ -100,6 +106,16 @@ def is_admin(uid, uname):
         return True
     return False
 
+def is_known_user(uid):
+    return get_db().find_one({"_id": f"user_{uid}"}) is not None
+
+def add_known_user(uid, uname, fname):
+    get_db().update_one(
+        {"_id": f"user_{uid}"},
+        {"$set": {"uid": uid, "username": uname, "fname": fname, "added": time.time()}},
+        upsert=True
+    )
+
 def check_perm(key, adm):
     if key not in PERMS:
         return True
@@ -128,8 +144,22 @@ def parse_mnp(t):
     rtime = f"{int(rtm.group(1)):02d}:{rtm.group(2)}" if rtm else None
     return {"distributors": dists, "total": total, "report_time": rtime}
 
+def is_balance_report(t):
+    if not t:
+        return False
+    tl = t.lower()
+    if "distributor balance report" in tl:
+        return True
+    if "balance report" in tl and "msisdn" in tl:
+        return True
+    if "distributor balance" in tl and "stock days" in tl:
+        return True
+    return False
+
 def parse_bal(t):
-    if not t or "Distributor Balance Report" not in t:
+    if not t:
+        return None
+    if not is_balance_report(t):
         return None
     items = [{"msisdn": m.group(1), "balance": int(m.group(2)), "sale_lakh": int(m.group(3)), "stock_days": float(m.group(4))} for m in BAL_P.finditer(t)]
     return {"items": items} if items else None
@@ -322,7 +352,7 @@ def parse_range(lo):
     except:
         return None, None
 
-def qc(config, w=800, h=400):
+    def qc(config, w=800, h=400):
     e = urllib.parse.quote(json.dumps(config))
     return f"https://quickchart.io/chart?c={e}&w={w}&h={h}&bkg=white&plugins=chartjs-plugin-datalabels"
 
@@ -492,7 +522,7 @@ def peak_hour_for_date(target_date):
         lines.append(f"📊 Best hour: {best_h:02d}:00-{best_h+1:02d}:00 ({best_c} MNP)")
     return "\n".join(lines)
 
-def weekly_sum():
+    def weekly_sum():
     d = daily_data(7)
     dt = d["dist_totals"]
     u_total = dt.get("Uday Comm Agr", 0)
@@ -1188,23 +1218,63 @@ def report_missing():
 @bot.message_handler(func=lambda m: True)
 def handle(message):
     try:
-        # ===== SR GROUPS ME KOL REPLY NAHI =====
-        if str(message.chat.id) in get_sr_groups():
-            return
-        
         text = message.text or ""
         msg_ts = message.date
+        uid = message.from_user.id
+        un = message.from_user.username
+        fname = message.from_user.first_name or ""
+        adm = is_admin(uid, un)
+        chat_id_str = str(message.chat.id)
+        is_priv = message.chat.type == "private"
+        is_sr_group = chat_id_str in get_sr_groups()
+
+        # ===== SAARE USERS KO TRACK KARO (private ya group) =====
+        if not is_sr_group:
+            try:
+                add_known_user(uid, un, fname)
+            except:
+                pass
+
+        # ===== SR GROUPS LOGIC =====
+        if is_sr_group:
+            # Sirf admin SR group me AI toggle kar sakta hai
+            if adm and text:
+                lo_sr = text.lower().strip()
+                if lo_sr in ["sr ai on", "/sr ai on", "ai on"]:
+                    set_sr_ai(True)
+                    bot.reply_to(message, "✅ SR AI reply ON ho gaya\n\nAb SR groups me koi bhi message aayega to AI reply karega.")
+                    return
+                if lo_sr in ["sr ai off", "/sr ai off", "ai off"]:
+                    set_sr_ai(False)
+                    bot.reply_to(message, "🔇 SR AI reply OFF ho gaya\n\nAb SR groups me koi bhi message aayega to bot chup rahega.")
+                    return
+            # AI reply agar enabled hai
+            if sr_ai_enabled() and text and not text.startswith("/"):
+                try:
+                    r = client.chat.completions.create(
+                        messages=[
+                            {"role": "system", "content": "You are a helpful Telegram assistant. Reply in same language (Hindi/Hinglish). 1-2 short lines."},
+                            {"role": "user", "content": text}
+                        ], model="openai/gpt-oss-20b")
+                    bot.reply_to(message, r.choices[0].message.content.strip())
+                except Exception:
+                    pass
+            return  # SR group me data save nahi karna, aur kuch nahi
+
+        # ===== MAIN GROUP + PRIVATE CHAT LOGIC =====
         if message.chat.id == int(GROUP_CHAT_ID) and ("FTA MNP" in text or "FTD" in text):
             save_mnp(text, msg_ts)
-        if message.chat.id == int(GROUP_CHAT_ID) and "Distributor Balance Report" in text:
+
+        # ===== FLEXIBLE BALANCE REPORT DETECTION =====
+        if is_balance_report(text):
             p = save_bal(text, msg_ts)
             if p:
                 th = get_settings().get("stock_threshold", 3)
                 al = bal_alert(p, th)
                 if al:
-                    bot.send_message(GROUP_CHAT_ID, al)
+                    bot.send_message(message.chat.id, al)
             return
-        is_priv = message.chat.type == "private"
+
         is_tag = BOT_USERNAME.lower() in text.lower()
         is_rep_bot = False
         if message.reply_to_message and message.reply_to_message.from_user:
@@ -1213,11 +1283,14 @@ def handle(message):
                 is_rep_bot = True
         if not is_priv and not is_tag and not is_rep_bot:
             return
+
+        # ===== PRIVATE CHAT ME UNKNOWN USER CHECK =====
+        if is_priv and not adm and not is_known_user(uid):
+            bot.reply_to(message, "🙏 Ye bot sirf DTR Mainpuri group ke liye hai.\n\nAap is group ke member nahi hain. Kripya group me contact karein.")
+            return
+
         ct = text.replace(BOT_USERNAME, "").strip() or "Hi"
         lo = ct.lower()
-        uid = message.from_user.id
-        un = message.from_user.username
-        adm = is_admin(uid, un)
 
         # ===== SR GROUP MANAGEMENT (Admin Only) =====
         if lo.startswith("sr add "):
@@ -1253,12 +1326,15 @@ def handle(message):
             if not groups:
                 bot.reply_to(message, "❌ Koi SR group nahi hai.\n\nAdd karne ke liye: `sr add -1234567890`", parse_mode="Markdown")
                 return
-            lines = [f"📋 SR Groups ({len(groups)})", ""]
+            ai_state = "✅ ON" if sr_ai_enabled() else "🔇 OFF"
+            lines = [f"📋 SR Groups ({len(groups)})", f"🤖 AI Reply: {ai_state}", ""]
             for i, g in enumerate(groups, 1):
                 lines.append(f"{i}. `{g}`")
             lines.append("")
             lines.append("Add: `sr add -1234567890`")
             lines.append("Remove: `sr remove -1234567890`")
+            lines.append("AI ON: `sr ai on`")
+            lines.append("AI OFF: `sr ai off`")
             bot.reply_to(message, "\n".join(lines), parse_mode="Markdown")
             return
 
@@ -1306,7 +1382,7 @@ def handle(message):
 
         if lo.strip() in ["who am i", "main kaun hu", "mera role"]:
             r = "👑 Owner/Admin" if adm else "👤 Normal User"
-            bot.reply_to(message, f"{r}\n\nUsername: @{un or 'not set'}\nUser ID: {uid}")
+            bot.reply_to(message, f"{r}\n\nUsername: @{un or 'not set'}\nUser ID: {uid}\nName: {fname}")
             return
 
         # ===== MENU =====
@@ -1731,7 +1807,26 @@ def handle(message):
         except:
             pass
 
-
+@bot.message_handler(content_types=['new_chat_members'])
+def welcome_new_member(message):
+    try:
+        if message.chat.id != int(GROUP_CHAT_ID):
+            return
+        for member in message.new_chat_members:
+            if member.is_bot:
+                continue
+            name = member.first_name or member.username or "Member"
+            welcome_text = (
+                "🎉 Welcome to DTR Mainpuri Group!\n\n"
+                f"👋 Hello {name} Sir!\n"
+                "🤝 Aapka swagat hai!\n\n"
+                "🤵 Mai hu Akash Sir ka Assistant Report's\n\n"
+                "📊 Aapki kisi bhi madad ke liye main yahi hoon —\n"
+                "mujhe bulane ke liye tag karke /menu bhejen"
+            )
+            bot.send_message(message.chat.id, welcome_text)
+    except Exception as e:
+        print("Welcome error:", str(e))
 
 BTN_MAP = {
     "graph_bar": "graphs", "graph_pie": "graphs", "graph_line": "graphs",
