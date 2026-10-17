@@ -57,13 +57,17 @@ def get_sr_groups():
 def add_sr_group(gid):
     groups = get_sr_groups()
     if gid not in groups:
-        groups.append(gid); upd_setting("sr_groups", groups); return True
+        groups.append(gid)
+        upd_setting("sr_groups", groups)
+        return True
     return False
 
 def remove_sr_group(gid):
     groups = get_sr_groups()
     if gid in groups:
-        groups.remove(gid); upd_setting("sr_groups", groups); return True
+        groups.remove(gid)
+        upd_setting("sr_groups", groups)
+        return True
     return False
 
 def sr_ai_enabled(): return get_settings().get("sr_ai_enabled", False)
@@ -80,8 +84,13 @@ def send_to_sr_groups(msg, specific_gid=None):
 
 def save_scheduled(target, time_str, msg, sched_type="daily", specific_gid=None):
     key = f"{target}_{time_str.replace(':','')}_{uuid.uuid4().hex[:4]}"
-    doc = {"_id": f"sched_{key}", "target": target, "time": time_str, "message": msg, "type": sched_type, "date": datetime.now().strftime("%Y-%m-%d"), "last_sent": "", "created": time.time(), "specific_gid": specific_gid}
-    get_db().insert_one(doc); return key
+    doc = {
+        "_id": f"sched_{key}", "target": target, "time": time_str, "message": msg,
+        "type": sched_type, "date": datetime.now().strftime("%Y-%m-%d"),
+        "last_sent": "", "created": time.time(), "specific_gid": specific_gid
+    }
+    get_db().insert_one(doc)
+    return key
 
 def get_all_scheduled(): return list(get_db().find({"_id": {"$regex": "^sched_"}}))
 def mark_sent(key, date_str): get_db().update_one({"_id": f"sched_{key}"}, {"$set": {"last_sent": date_str}})
@@ -91,7 +100,9 @@ def today_str(): return time.strftime("%Y-%m-%d", time.gmtime(time.time() + IST)
 def yest_str(): return time.strftime("%Y-%m-%d", time.gmtime(time.time() + IST - 86400))
 
 def get_wh():
-    s = get_settings(); return s.get("wh_start", 7.0), s.get("wh_end", 19.0)
+    s = get_settings()
+    return s.get("wh_start", 7.0), s.get("wh_end", 19.0)
+
 def set_wh(a, b): get_db().update_one({"_id": "settings"}, {"$set": {"wh_start": a, "wh_end": b}}, upsert=True)
 
 def get_target(k, period="day"): return get_settings().get(f"target_{period}_{k}", 0)
@@ -104,6 +115,7 @@ def is_admin(uid, uname):
 
 def is_known_user(uid): return get_db().find_one({"_id": f"user_{uid}"}) is not None
 def add_known_user(uid, uname, fname): get_db().update_one({"_id": f"user_{uid}"}, {"$set": {"uid": uid, "username": uname, "fname": fname, "added": time.time()}}, upsert=True)
+
 def check_perm(key, adm):
     if key not in PERMS: return True
     return PERMS[key][0] if adm else PERMS[key][1]
@@ -152,9 +164,11 @@ def save_bal(t, ts):
 def daily_data(days=7, mtd=False):
     now = datetime.now()
     if mtd:
-        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0); days_count = now.day
+        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        days_count = now.day
     else:
-        start = now - timedelta(days=days-1); days_count = days
+        start = now - timedelta(days=days-1)
+        days_count = days
     utc0 = start.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() - IST
     reps = list(get_db().find({"timestamp": {"$gte": utc0}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", 1))
     last = {}
@@ -162,46 +176,124 @@ def daily_data(days=7, mtd=False):
     labels, uday, mv, tot = [], [], [], []
     dtw = {}
     for i in range(days_count-1, -1, -1):
-        d = now - timedelta(days=i); k = d.strftime("%Y-%m-%d"); labels.append(d.strftime("%d %b"))
+        d = now - timedelta(days=i)
+        k = d.strftime("%Y-%m-%d")
+        labels.append(d.strftime("%d %b"))
         r = last.get(k)
-        if not r: uday.append(0); mv.append(0); tot.append(0); continue
+        if not r:
+            uday.append(0); mv.append(0); tot.append(0); continue
         p = r.get("parsed") or parse_mnp(r.get("text", ""))
-        if not p: uday.append(0); mv.append(0); tot.append(0); continue
+        if not p:
+            uday.append(0); mv.append(0); tot.append(0); continue
         u = p["distributors"].get("Uday Comm Agr", {}).get("total", 0)
         m = p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
         t2 = (p.get("total") or {}).get("total", 0)
         uday.append(u); mv.append(m); tot.append(t2)
-        dtw["Uday Comm Agr"] = dtw.get("Uday Comm Agr", 0) + u; dtw["Maa Vaishno Telecom"] = dtw.get("Maa Vaishno Telecom", 0) + m
+        dtw["Uday Comm Agr"] = dtw.get("Uday Comm Agr", 0) + u
+        dtw["Maa Vaishno Telecom"] = dtw.get("Maa Vaishno Telecom", 0) + m
     return {"labels": labels, "uday": uday, "mv": mv, "total": tot, "dist_totals": dtw}
 
+def weekly_sum():
+    d = daily_data(7)
+    dt = d["dist_totals"]
+    u_total = dt.get("Uday Comm Agr", 0)
+    m_total = dt.get("Maa Vaishno Telecom", 0)
+    grand = u_total + m_total
+    dts = {d["labels"][i]: d["total"][i] for i in range(len(d["labels"]))}
+    lines = ["📊 Weekly MNP Summary", "(Last 7 days)", "", "Distributor-wise:"]
+    lines.append(f"🔵 Uday Comm Agr: {u_total}")
+    lines.append(f"🔴 Maa Vaishno: {m_total}")
+    lines.append("")
+    lines.append(f"🎯 Total (dono milakar): {grand}")
+    nz = {k: v for k, v in dts.items() if v > 0}
+    if nz:
+        b = max(nz.items(), key=lambda x: x[1])
+        w = min(nz.items(), key=lambda x: x[1])
+        lines.append("")
+        lines.append(f"🏆 Best day: {b[0]} ({b[1]})")
+        lines.append(f"📉 Lowest: {w[0]} ({w[1]})")
+    return "\n".join(lines)
+
+def monthly_sum():
+    now = datetime.now()
+    today = now.date()
+    ms = today.replace(day=1)
+    um = datetime.combine(ms, datetime.min.time()).timestamp() - IST
+    reps = list(get_db().find({"timestamp": {"$gte": um}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", 1))
+    if not reps:
+        return "❌ Is mahine koi report nahi aayi."
+    daily = {}
+    for r in reps:
+        daily[time.strftime("%Y-%m-%d", time.gmtime(r["timestamp"] + IST))] = r
+    u_total = 0; m_total = 0; days_count = 0; day_breakdown = {}
+    for k, r in daily.items():
+        p = r.get("parsed") or parse_mnp(r.get("text", ""))
+        if not p: continue
+        u = p["distributors"].get("Uday Comm Agr", {}).get("total", 0)
+        m = p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
+        u_total += u; m_total += m; days_count += 1; day_breakdown[k] = u + m
+    grand = u_total + m_total
+    lines = [f"📅 Monthly Summary ({ms.strftime('%b %Y')})", "", "Distributor-wise:"]
+    lines.append(f"🔵 Uday Comm Agr: {u_total}")
+    lines.append(f"🔴 Maa Vaishno: {m_total}")
+    lines.append("")
+    lines.append(f"🎯 Total (dono milakar): {grand}")
+    lines.append(f"📆 Din: {days_count}")
+    if day_breakdown:
+        b = max(day_breakdown.items(), key=lambda x: x[1])
+        w = min(day_breakdown.items(), key=lambda x: x[1])
+        lines.append("")
+        lines.append(f"🏆 Best day: {b[0]} ({b[1]})")
+        lines.append(f"📉 Lowest: {w[0]} ({w[1]})")
+    return "\n".join(lines)
+
 def mom_compare():
-    now = datetime.now(); today = now.date(); cur_start = today.replace(day=1); cur_end = today
-    lmy = today.year - 1 if today.month == 1 else today.year; lmm = 12 if today.month == 1 else today.month - 1
-    last_month_days = calendar.monthrange(lmy, lmm)[1]; last_day = min(today.day, last_month_days)
-    last_start = datetime(lmy, lmm, 1).date(); last_end = datetime(lmy, lmm, last_day).date()
+    now = datetime.now()
+    today = now.date()
+    cur_start = today.replace(day=1)
+    cur_end = today
+    lmy = today.year - 1 if today.month == 1 else today.year
+    lmm = 12 if today.month == 1 else today.month - 1
+    last_month_days = calendar.monthrange(lmy, lmm)[1]
+    last_day = min(today.day, last_month_days)
+    last_start = datetime(lmy, lmm, 1).date()
+    last_end = datetime(lmy, lmm, last_day).date()
+    
     def get_total(sd, ed):
-        us = datetime.combine(sd, datetime.min.time()).timestamp() - IST; ue = datetime.combine(ed, datetime.max.time()).timestamp() - IST
+        us = datetime.combine(sd, datetime.min.time()).timestamp() - IST
+        ue = datetime.combine(ed, datetime.max.time()).timestamp() - IST
         reps = list(get_db().find({"timestamp": {"$gte": us, "$lte": ue}, "text": {"$regex": "FTA MNP|FTD"}}))
         daily = {}
         for r in reps: daily[time.strftime("%Y-%m-%d", time.gmtime(r["timestamp"] + IST))] = r
         u_tot = 0; m_tot = 0
         for r in daily.values():
             p = r.get("parsed") or parse_mnp(r.get("text", ""))
-            if p: u_tot += p["distributors"].get("Uday Comm Agr", {}).get("total", 0); m_tot += p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
+            if p:
+                u_tot += p["distributors"].get("Uday Comm Agr", {}).get("total", 0)
+                m_tot += p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
         return u_tot, m_tot
-    cu, cm = get_total(cur_start, cur_end); lu, lm = get_total(last_start, last_end)
-    cur_total = cu + cm; last_total = lu + lm
+        
+    cu, cm = get_total(cur_start, cur_end)
+    lu, lm = get_total(last_start, last_end)
+    cur_total = cu + cm
+    last_total = lu + lm
     lines = [f"📊 Month-over-Month ({today.day} din)", "", f"Is mahine ({cur_start.strftime('%d %b')} - {cur_end.strftime('%d %b')}):", f"🔵 Uday: {cu}", f"🔴 Maa Vaishno: {cm}", f"🎯 Total: {cur_total}", "", f"Pichhle mahine (same {today.day} din):", f"🔵 Uday: {lu}", f"🔴 Maa Vaishno: {lm}", f"🎯 Total: {last_total}"]
     if last_total > 0:
         growth = int((cur_total - last_total) / last_total * 100)
-        lines.append(f"\n{'📈' if growth >= 0 else '📉'} Growth: {'+' if growth >= 0 else ''}{growth}%")
-    else: lines.append("\n⚠️ Pichhle mahine ka data nahi hai.")
+        arrow = "📈" if growth >= 0 else "📉"
+        lines.append("")
+        lines.append(f"{arrow} Growth: {'+' if growth >= 0 else ''}{growth}%")
+    else:
+        lines.append("")
+        lines.append("⚠️ Pichhle mahine ka data nahi hai.")
     return "\n".join(lines)
 
 def best_worst(days=30):
-    d = daily_data(days); nz = [(d["labels"][i], d["total"][i]) for i in range(len(d["total"])) if d["total"][i] > 0]
+    d = daily_data(days)
+    nz = [(d["labels"][i], d["total"][i]) for i in range(len(d["total"])) if d["total"][i] > 0]
     if not nz: return "❌ Koi data nahi."
-    best = max(nz, key=lambda x: x[1]); worst = min(nz, key=lambda x: x[1])
+    best = max(nz, key=lambda x: x[1])
+    worst = min(nz, key=lambda x: x[1])
     return f"🏆 Best/Worst Day (last {days} days)\n\n🥇 Best day: {best[0]} — {best[1]} MNP\n📉 Worst day: {worst[0]} — {worst[1]} MNP"
 
 def qc(config, w=800, h=400):
@@ -209,45 +301,93 @@ def qc(config, w=800, h=400):
     return f"https://quickchart.io/chart?c={e}&w={w}&h={h}&bkg=white&plugins=chartjs-plugin-datalabels"
 
 def bar_chart(days=7, mtd=False):
-    d = daily_data(days, mtd=mtd); title_txt = "Daily MNP - MTD" if mtd else f"Daily MNP - Last {days} Days"
-    cfg = {"type": "bar", "data": {"labels": d["labels"], "datasets": [{"label": "Uday Comm Agr", "data": d["uday"], "backgroundColor": "#2196F3"}, {"label": "Maa Vaishno Telecom", "data": d["mv"], "backgroundColor": "#F44336"}, {"label": "Total", "data": d["total"], "backgroundColor": "#4CAF50"}]}, "options": {"title": {"display": True, "text": title_txt, "fontSize": 16}, "legend": {"position": "bottom"}, "plugins": {"datalabels": {"display": True, "color": "white", "anchor": "center", "align": "center", "font": {"size": 11, "weight": "bold"}, "formatter": "function(v){return v>0?v:'';}"}}}}
+    d = daily_data(days, mtd=mtd)
+    title_txt = "Daily MNP - MTD" if mtd else f"Daily MNP - Last {days} Days"
+    cfg = {"type": "bar", "data": {"labels": d["labels"], "datasets": [
+        {"label": "Uday Comm Agr", "data": d["uday"], "backgroundColor": "#2196F3"},
+        {"label": "Maa Vaishno Telecom", "data": d["mv"], "backgroundColor": "#F44336"},
+        {"label": "Total", "data": d["total"], "backgroundColor": "#4CAF50"}]},
+        "options": {"title": {"display": True, "text": title_txt, "fontSize": 16},
+        "legend": {"position": "bottom"},
+        "plugins": {"datalabels": {"display": True, "color": "white", "anchor": "center", "align": "center",
+        "font": {"size": 11, "weight": "bold"}, "formatter": "function(v){return v>0?v:'';}"}}}}
     return qc(cfg)
 
 def pie_chart(days=7, mtd=False):
-    d = daily_data(days, mtd=mtd); dt = d["dist_totals"]; labels = list(dt.keys()) if dt else ["No Data"]; values = list(dt.values()) if dt else [1]
+    d = daily_data(days, mtd=mtd)
+    dt = d["dist_totals"]
+    labels = list(dt.keys()) if dt else ["No Data"]
+    values = list(dt.values()) if dt else [1]
     title_txt = "Distributor Share - MTD" if mtd else f"Distributor Share - Last {days} Days"
-    cfg = {"type": "doughnut", "data": {"labels": labels, "datasets": [{"data": values, "backgroundColor": ["#2196F3", "#F44336", "#4CAF50"]}]}, "options": {"title": {"display": True, "text": title_txt, "fontSize": 16}, "legend": {"position": "bottom"}, "plugins": {"datalabels": {"display": True, "color": "white", "font": {"size": 12, "weight": "bold"}, "formatter": "function(v,c){var s=c.dataset.data.reduce(function(a,b){return a+b;},0);var p=Math.round(v/s*100);return v+'\\n('+p+'%)';}"}}}}
+    cfg = {"type": "doughnut", "data": {"labels": labels, "datasets": [{"data": values, "backgroundColor": ["#2196F3", "#F44336", "#4CAF50"]}]},
+        "options": {"title": {"display": True, "text": title_txt, "fontSize": 16},
+        "legend": {"position": "bottom"},
+        "plugins": {"datalabels": {"display": True, "color": "white", "font": {"size": 12, "weight": "bold"},
+        "formatter": "function(v,c){var s=c.dataset.data.reduce(function(a,b){return a+b;},0);var p=Math.round(v/s*100);return v+'\\n('+p+'%)';}"}}}}
     return qc(cfg)
 
 def line_chart(days=7, mtd=False):
-    d = daily_data(days, mtd=mtd); title_txt = "MNP Trend - MTD" if mtd else f"MNP Trend - Last {days} Days"
-    cfg = {"type": "line", "data": {"labels": d["labels"], "datasets": [{"label": "Uday Comm Agr", "data": d["uday"], "borderColor": "#2196F3", "fill": False, "tension": 0.3, "datalabels": {"display": True, "align": "top", "anchor": "end", "offset": 6, "color": "#1565C0", "font": {"size": 10, "weight": "bold"}, "formatter": "function(v){return v>0?v:'';}"}}, {"label": "Maa Vaishno Telecom", "data": d["mv"], "borderColor": "#F44336", "fill": False, "tension": 0.3, "datalabels": {"display": True, "align": "bottom", "anchor": "end", "offset": 6, "color": "#B71C1C", "font": {"size": 10, "weight": "bold"}, "formatter": "function(v){return v>0?v:'';}"}}, {"label": "Total", "data": d["total"], "borderColor": "#4CAF50", "fill": False, "tension": 0.3, "borderWidth": 3, "datalabels": {"display": True, "align": "top", "anchor": "end", "offset": 20, "color": "#1B5E20", "font": {"size": 11, "weight": "bold"}, "formatter": "function(v){return v>0?v:'';}"}}]}, "options": {"title": {"display": True, "text": title_txt, "fontSize": 16}, "legend": {"position": "bottom"}, "layout": {"padding": {"top": 40}}}}
+    d = daily_data(days, mtd=mtd)
+    title_txt = "MNP Trend - MTD" if mtd else f"MNP Trend - Last {days} Days"
+    cfg = {"type": "line", "data": {"labels": d["labels"], "datasets": [
+        {"label": "Uday Comm Agr", "data": d["uday"], "borderColor": "#2196F3", "fill": False, "tension": 0.3,
+         "datalabels": {"display": True, "align": "top", "anchor": "end", "offset": 6, "color": "#1565C0", "font": {"size": 10, "weight": "bold"}, "formatter": "function(v){return v>0?v:'';}"}},
+        {"label": "Maa Vaishno Telecom", "data": d["mv"], "borderColor": "#F44336", "fill": False, "tension": 0.3,
+         "datalabels": {"display": True, "align": "bottom", "anchor": "end", "offset": 6, "color": "#B71C1C", "font": {"size": 10, "weight": "bold"}, "formatter": "function(v){return v>0?v:'';}"}},
+        {"label": "Total", "data": d["total"], "borderColor": "#4CAF50", "fill": False, "tension": 0.3, "borderWidth": 3,
+         "datalabels": {"display": True, "align": "top", "anchor": "end", "offset": 20, "color": "#1B5E20", "font": {"size": 11, "weight": "bold"}, "formatter": "function(v){return v>0?v:'';}"}}]},
+        "options": {"title": {"display": True, "text": title_txt, "fontSize": 16},
+        "legend": {"position": "bottom"}, "layout": {"padding": {"top": 40}}}}
     return qc(cfg)
 
 def dist_chart(dist, ctype="bar", days=7, mtd=False):
     d = daily_data(days, mtd=mtd)
-    if "uday" in dist.lower(): vals = d["uday"]; n = "Uday Comm Agr"; color = "#2196F3"
-    else: vals = d["mv"]; n = "Maa Vaishno Telecom"; color = "#F44336"
+    if "uday" in dist.lower():
+        vals = d["uday"]; n = "Uday Comm Agr"; color = "#2196F3"
+    else:
+        vals = d["mv"]; n = "Maa Vaishno Telecom"; color = "#F44336"
     title_txt = f"{n} - MTD" if mtd else f"{n} - Last {days} Days"
     if ctype == "bar":
-        cfg = {"type": "bar", "data": {"labels": d["labels"], "datasets": [{"label": n, "data": vals, "backgroundColor": color}]}, "options": {"title": {"display": True, "text": title_txt, "fontSize": 16}, "legend": {"display": False}, "plugins": {"datalabels": {"display": True, "color": "white", "anchor": "center", "align": "center", "font": {"size": 11, "weight": "bold"}, "formatter": "function(v){return v>0?v:'';}"}}}}
+        cfg = {"type": "bar", "data": {"labels": d["labels"], "datasets": [
+            {"label": n, "data": vals, "backgroundColor": color}]},
+            "options": {"title": {"display": True, "text": title_txt, "fontSize": 16},
+            "legend": {"display": False},
+            "plugins": {"datalabels": {"display": True, "color": "white", "anchor": "center", "align": "center",
+            "font": {"size": 11, "weight": "bold"}, "formatter": "function(v){return v>0?v:'';}"}}}}
     elif ctype == "line":
-        cfg = {"type": "line", "data": {"labels": d["labels"], "datasets": [{"label": n, "data": vals, "borderColor": color, "fill": False, "tension": 0.3, "borderWidth": 3, "datalabels": {"display": True, "align": "top", "anchor": "end", "offset": 6, "color": color, "font": {"size": 11, "weight": "bold"}, "formatter": "function(v){return v>0?v:'';}"}}]}, "options": {"title": {"display": True, "text": title_txt, "fontSize": 16}, "legend": {"display": False}, "layout": {"padding": {"top": 40}}}}
+        cfg = {"type": "line", "data": {"labels": d["labels"], "datasets": [
+            {"label": n, "data": vals, "borderColor": color, "fill": False, "tension": 0.3, "borderWidth": 3,
+             "datalabels": {"display": True, "align": "top", "anchor": "end", "offset": 6, "color": color, "font": {"size": 11, "weight": "bold"}, "formatter": "function(v){return v>0?v:'';}"}}]},
+            "options": {"title": {"display": True, "text": title_txt, "fontSize": 16},
+            "legend": {"display": False}, "layout": {"padding": {"top": 40}}}}
     else:
         tot = sum(vals)
-        cfg = {"type": "doughnut", "data": {"labels": [n], "datasets": [{"data": [tot], "backgroundColor": [color]}]}, "options": {"title": {"display": True, "text": title_txt + f" (Total: {tot})", "fontSize": 16}, "legend": {"position": "bottom"}, "plugins": {"datalabels": {"display": True, "color": "white", "font": {"size": 14, "weight": "bold"}, "formatter": "function(v){return v;}"}}}}
+        cfg = {"type": "doughnut", "data": {"labels": [n], "datasets": [{"data": [tot], "backgroundColor": [color]}]},
+            "options": {"title": {"display": True, "text": title_txt + f" (Total: {tot})", "fontSize": 16},
+            "legend": {"position": "bottom"},
+            "plugins": {"datalabels": {"display": True, "color": "white", "font": {"size": 14, "weight": "bold"},
+            "formatter": "function(v){return v;}"}}}}
     return qc(cfg)
 
 def peak_hours(days=7):
-    now = datetime.now(); ws_h = 7; we_h = 21; s = now - timedelta(days=days-1)
+    now = datetime.now()
+    ws_h = 7
+    we_h = 21
+    s = now - timedelta(days=days-1)
     us = s.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() - IST
     reps = list(get_db().find({"timestamp": {"$gte": us}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", 1))
-    if not reps: return "❌ Koi report nahi mili."
+    if not reps:
+        return "❌ Koi report nahi mili."
     bd = {}
-    for r in reps: bd.setdefault(time.strftime("%Y-%m-%d", time.gmtime(r["timestamp"] + IST)), []).append(r)
-    hr_total = {}; hr_days = {}
+    for r in reps:
+        k = time.strftime("%Y-%m-%d", time.gmtime(r["timestamp"] + IST))
+        bd.setdefault(k, []).append(r)
+    hr_total = {}
+    hr_days = {}
     for k, rr in bd.items():
-        prev = 0; prev_ts = None; day_hours = set()
+        prev = 0
+        prev_ts = None
+        day_hours = set()
         for r in rr:
             p = r.get("parsed") or parse_mnp(r.get("text", ""))
             if not p: continue
@@ -256,152 +396,80 @@ def peak_hours(days=7):
                 d = ct - prev
                 if d > 0:
                     h = datetime.fromtimestamp(prev_ts + IST).hour
-                    if ws_h <= h < we_h: hr_total[h] = hr_total.get(h, 0) + d; day_hours.add(h)
-            prev = ct; prev_ts = r["timestamp"]
-        for h in day_hours: hr_days[h] = hr_days.get(h, 0) + 1
-    if not hr_total: return "❌ Working hours me koi data nahi mila."
+                    if ws_h <= h < we_h:
+                        hr_total[h] = hr_total.get(h, 0) + d
+                        day_hours.add(h)
+            prev = ct
+            prev_ts = r["timestamp"]
+        for h in day_hours:
+            hr_days[h] = hr_days.get(h, 0) + 1
+    if not hr_total:
+        return "❌ Working hours (7 AM - 9 PM) me koi data nahi mila."
     combined = []
     for h, tot in hr_total.items():
-        active_days = hr_days.get(h, 1); avg = int(tot / active_days) if active_days else 0
+        active_days = hr_days.get(h, 1)
+        avg = int(tot / active_days) if active_days else 0
         combined.append((h, tot, avg, active_days))
-    combined.sort(key=lambda x: -x[2]); top5 = combined[:5]
+    combined.sort(key=lambda x: -x[2])
+    top5 = combined[:5]
     lines = [f"🕐 Peak Hours (Last {days} Days)", f"⏰ 7:00 AM - 9:00 PM", ""]
     for i, (h, tot, avg, ad) in enumerate(top5, 1):
         medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "•"
         lines.append(f"{medal} {h:02d}:00 - {h+1:02d}:00 → avg {avg} MNP")
     if top5:
         best_h, best_tot, best_avg, _ = top5[0]
-        lines.append(f"\n📊 Sabse zyada business: {best_h:02d}:00-{best_h+1:02d}:00 (avg {best_avg}/din)")
+        lines.append("")
+        lines.append(f"📊 Sabse zyada business: {best_h:02d}:00-{best_h+1:02d}:00 (avg {best_avg}/din)")
     return "\n".join(lines)
 
-def projection(period="day"):
-    ws, we = get_wh(); now = datetime.now(); today = now.date()
-    if period == "day":
-        utc0 = datetime.combine(today, datetime.min.time()).timestamp() - IST
-        reps = list(get_db().find({"timestamp": {"$gte": utc0}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", 1))
-        if not reps: return "⚠️ Aaj koi report nahi aayi."
-        first = datetime.fromtimestamp(reps[0]["timestamp"] + IST); last = datetime.fromtimestamp(reps[-1]["timestamp"] + IST)
-        p = reps[-1].get("parsed") or parse_mnp(reps[-1].get("text", ""))
-        u = p["distributors"].get("Uday Comm Agr", {}).get("total", 0); m = p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
-        t = (p.get("total") or {}).get("total", 0); ch = last.hour + last.minute/60
-        sh = max(first.hour + first.minute/60, ws); el = max(0.5, ch - sh); rem = max(0, we - ch)
-        if rem <= 0: return f"📈 FTD Projection (Aaj ka final)\n\n🔵 Uday: {u}\n🔴 Maa Vaishno: {m}\n🎯 Total: {t}"
-        pu = int(u/el*(el+rem)); pm = int(m/el*(el+rem)); pt = int(t/el*(el+rem))
-        return f"📈 FTD Projection\n\nAbhi tak ({last.strftime('%H:%M')}):\n🔵 Uday: {u}\n🔴 Maa Vaishno: {m}\n🎯 Total: {t}\n\nExpected ({int(we)}:00 tak):\n🔵 Uday: ~{pu}\n🔴 Maa Vaishno: ~{pm}\n🎯 Total: ~{pt}"
-    return "❌ Period samjha nahi."
-
-def proj_week():
-    now = datetime.now(); today = now.date(); mon = today - timedelta(days=today.weekday())
-    um = datetime.combine(mon, datetime.min.time()).timestamp() - IST
-    reps = list(get_db().find({"timestamp": {"$gte": um}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", 1))
-    daily = {}
-    for r in reps: daily[time.strftime("%Y-%m-%d", time.gmtime(r["timestamp"] + IST))] = r
-    u_sofar = 0; m_sofar = 0; dd = 0
-    for r in daily.values():
-        p = parse_mnp(r.get("text", ""))
-        if p: u_sofar += p["distributors"].get("Uday Comm Agr", {}).get("total", 0); m_sofar += p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0); dd += 1
-    t_sofar = u_sofar + m_sofar; rd = 7 - today.weekday() - 1
-    u_avg = int(u_sofar/dd) if dd else 0; m_avg = int(m_sofar/dd) if dd else 0
-    u_exp = int(u_sofar + u_avg * rd); m_exp = int(m_sofar + m_avg * rd); t_exp = u_exp + m_exp
-    lines = ["📊 Weekly Projection", "", f"Abhi tak ({dd} din):", f"🔵 Uday: {u_sofar}", f"🔴 Maa Vaishno: {m_sofar}", f"🎯 Total: {t_sofar}", "", "📊 Daily Avg:", f"🔵 Uday: {u_avg}/din", f"🔴 Maa Vaishno: {m_avg}/din", "", f"📈 Expected ({rd} din baaki):", f"🔵 Uday: ~{u_exp}", f"🔴 Maa Vaishno: ~{m_exp}", f"🎯 Total: ~{t_exp}"]
+def peak_hour_for_date(target_date):
+    ws_h = 7
+    we_h = 21
+    s = datetime.combine(target_date, datetime.min.time()).timestamp() - IST
+    e = s + 86400
+    reps = list(get_db().find({"timestamp": {"$gte": s, "$lt": e}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", 1))
+    if not reps:
+        return f"❌ {target_date.strftime('%d %b')} ko koi MNP report nahi aayi."
+    hr = {}
+    prev = 0
+    prev_ts = None
+    for r in reps:
+        p = r.get("parsed") or parse_mnp(r.get("text", ""))
+        if not p: continue
+        ct = (p.get("total") or {}).get("total", 0)
+        if prev > 0 and prev_ts is not None:
+            d = ct - prev
+            if d > 0:
+                h = datetime.fromtimestamp(prev_ts + IST).hour
+                if ws_h <= h < we_h:
+                    hr[h] = hr.get(h, 0) + d
+        prev = ct
+        prev_ts = r["timestamp"]
+    if not hr:
+        return f"❌ {target_date.strftime('%d %b')} ko working hours (7 AM - 9 PM) me koi data nahi."
+    sh = sorted(hr.items(), key=lambda x: -x[1])
+    day_label = target_date.strftime('%d %b %Y')
+    today = datetime.now().date()
+    if target_date == today:
+        day_label = "Aaj"
+    elif target_date == today - timedelta(days=1):
+        day_label = "Kal"
+    elif target_date == today - timedelta(days=2):
+        day_label = "Parso"
+    lines = [f"🕐 Peak Hour — {day_label} ({target_date.strftime('%d %b %Y')})", f"⏰ 7:00 AM - 9:00 PM", ""]
+    for i, (h, c) in enumerate(sh[:5], 1):
+        medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "•"
+        lines.append(f"{medal} {h:02d}:00 - {h+1:02d}:00 → {c} MNP")
+    if sh:
+        best_h, best_c = sh[0]
+        lines.append("")
+        lines.append(f"📊 Best hour: {best_h:02d}:00-{best_h+1:02d}:00 ({best_c} MNP)")
     return "\n".join(lines)
-
-def proj_month():
-    now = datetime.now(); today = now.date(); ms = today.replace(day=1)
-    um = datetime.combine(ms, datetime.min.time()).timestamp() - IST
-    reps = list(get_db().find({"timestamp": {"$gte": um}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", 1))
-    daily = {}
-    for r in reps: daily[time.strftime("%Y-%m-%d", time.gmtime(r["timestamp"] + IST))] = r
-    u_sofar = 0; m_sofar = 0; dd = 0
-    for r in daily.values():
-        p = parse_mnp(r.get("text", ""))
-        if p: u_sofar += p["distributors"].get("Uday Comm Agr", {}).get("total", 0); m_sofar += p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0); dd += 1
-    t_sofar = u_sofar + m_sofar
-    nm = today.replace(year=today.year+1, month=1, day=1) if today.month == 12 else today.replace(month=today.month+1, day=1)
-    dim = (nm - ms).days; rd = dim - today.day
-    u_avg = int(u_sofar/dd) if dd else 0; m_avg = int(m_sofar/dd) if dd else 0
-    u_exp = int(u_sofar + u_avg * rd); m_exp = int(m_sofar + m_avg * rd); t_exp = u_exp + m_exp
-    lines = [f"📅 MTD Projection ({ms.strftime('%b %Y')})", "", f"Abhi tak ({dd} din):", f"🔵 Uday: {u_sofar}", f"🔴 Maa Vaishno: {m_sofar}", f"🎯 Total: {t_sofar}", "", "📊 Daily Avg:", f"🔵 Uday: {u_avg}/din", f"🔴 Maa Vaishno: {m_avg}/din", "", f"📈 Expected ({rd} din baaki):", f"🔵 Uday: ~{u_exp}", f"🔴 Maa Vaishno: ~{m_exp}", f"🎯 Total: ~{t_exp}"]
-    return "\n".join(lines)
-
-def day_ach():
-    now = datetime.now(); today = now.date(); utc0 = datetime.combine(today, datetime.min.time()).timestamp() - IST
-    reps = list(get_db().find({"timestamp": {"$gte": utc0}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", -1).limit(1))
-    if not reps: return "❌ Aaj koi report nahi aayi."
-    p = reps[0].get("parsed") or parse_mnp(reps[0].get("text", ""))
-    if not p: return "❌ Report parse nahi ho paayi."
-    u = p["distributors"].get("Uday Comm Agr", {}).get("total", 0); m = p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0); t = u + m
-    return f"📊 FTD Achievement\n\nLatest: {reps[0].get('date_str', '')}\n\n🔵 Uday: {u}\n🔴 Maa Vaishno: {m}\n🎯 Total: {t}"
-
-def week_ach():
-    now = datetime.now(); today = now.date(); mon = today - timedelta(days=today.weekday())
-    um = datetime.combine(mon, datetime.min.time()).timestamp() - IST
-    reps = list(get_db().find({"timestamp": {"$gte": um}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", 1))
-    daily = {}
-    for r in reps: daily[time.strftime("%Y-%m-%d", time.gmtime(r["timestamp"] + IST))] = r
-    u_sofar = 0; m_sofar = 0; dd = 0
-    for r in daily.values():
-        p = parse_mnp(r.get("text", ""))
-        if p: u_sofar += p["distributors"].get("Uday Comm Agr", {}).get("total", 0); m_sofar += p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0); dd += 1
-    t_sofar = u_sofar + m_sofar
-    return f"📊 Weekly Achievement\n\nAbhi tak ({dd} din):\n🔵 Uday: {u_sofar}\n🔴 Maa Vaishno: {m_sofar}\n🎯 Total: {t_sofar}"
-
-def month_ach():
-    now = datetime.now(); today = now.date(); ms = today.replace(day=1)
-    if today.month == 12: nm = today.replace(year=today.year+1, month=1, day=1)
-    else: nm = today.replace(month=today.month+1, day=1)
-    total_days = (nm - ms).days; days_passed = today.day; days_left = total_days - days_passed
-    um = datetime.combine(ms, datetime.min.time()).timestamp() - IST
-    reps = list(get_db().find({"timestamp": {"$gte": um}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", 1))
-    daily = {}
-    for r in reps: daily[time.strftime("%Y-%m-%d", time.gmtime(r["timestamp"] + IST))] = r
-    u_sofar = 0; m_sofar = 0; dd = 0
-    for r in daily.values():
-        p = parse_mnp(r.get("text", ""))
-        if p: u_sofar += p["distributors"].get("Uday Comm Agr", {}).get("total", 0); m_sofar += p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0); dd += 1
-    t_sofar = u_sofar + m_sofar; u_avg = int(u_sofar/dd) if dd else 0; m_avg = int(m_sofar/dd) if dd else 0
-    lines = [f"📅 MTD Achievement ({ms.strftime('%b %Y')})", "", f"Abhi tak ({dd} din):", f"🔵 Uday: {u_sofar}", f"🔴 Maa Vaishno: {m_sofar}", f"🎯 Total: {t_sofar}", "", "📊 Current Daily Avg:", f"🔵 Uday: {u_avg} MNP/din", f"🔴 Maa Vaishno: {m_avg} MNP/din"]
-    mt_u = get_target("uday", "month"); mt_m = get_target("mv", "month")
-    if mt_u or mt_m:
-        lines.append(""); lines.append("🎯 Month Target:")
-        if mt_u: lines.append(f"🔵 Uday: {mt_u}")
-        if mt_m: lines.append(f"🔴 Maa Vaishno: {mt_m}")
-        lines.append(""); lines.append("⚖️ Target vs Achievement:")
-        if mt_u:
-            pct = int(u_sofar/mt_u*100); gap_u = mt_u - u_sofar; mark_u = f"❌ gap {gap_u}" if gap_u > 0 else "✅ Target Pura"
-            lines.append(f"🔵 Uday: {u_sofar}/{mt_u} ({pct}%) — {mark_u}")
-            if gap_u > 0 and days_left > 0:
-                rrr_u = int(gap_u / days_left); rrr_u += 1 if gap_u % days_left != 0 else 0
-                lines.append(f"📊 RRR ({days_left} din baaki): {rrr_u} MNP/din")
-                lines.append(f"⚠️ Alert !! Uday aapko apna target pura karne ke liye {rrr_u} MNP/din drive karna padega!! nahi to aap apna target miss kar denge!!")
-        lines.append("") 
-        if mt_m:
-            pct = int(m_sofar/mt_m*100); gap_m = mt_m - m_sofar; mark_m = f"❌ gap {gap_m}" if gap_m > 0 else "✅ Target Pura"
-            lines.append(f"🔴 Maa Vaishno: {m_sofar}/{mt_m} ({pct}%) — {mark_m}")
-            if gap_m > 0 and days_left > 0:
-                rrr_m = int(gap_m / days_left); rrr_m += 1 if gap_m % days_left != 0 else 0
-                lines.append(f"📊 RRR ({days_left} din baaki): {rrr_m} MNP/din")
-                lines.append(f"⚠️ Alert !! Maa Vaishno aapko apna target pura karne ke liye {rrr_m} MNP/din drive karna padega!! nahi to aap apna target miss kar denge!!")
-        if mt_u and mt_m:
-            tot_t = mt_u + mt_m; pct = int(t_sofar/tot_t*100); gap_t = tot_t - t_sofar
-            mark = f"❌ gap {gap_t}" if gap_t > 0 else "✅ Target Pura"
-            lines.append(""); lines.append(f"📌 Overall: {t_sofar}/{tot_t} ({pct}%) — {mark}")
-            if gap_t > 0 and days_left > 0:
-                rrr_t = int(gap_t / days_left); rrr_t += 1 if gap_t % days_left != 0 else 0
-                lines.append(f"📊 RRR ({days_left} din baaki): {rrr_t} MNP/din")
-    return "\n".join(lines)
-
-def dist_cmp(days=7, today_only=False):
-    if today_only: days = 1
-    d = daily_data(days); ut = sum(d["uday"]); mt = sum(d["mv"])
-    if ut == 0 and mt == 0: return "❌ Koi data nahi."
-    t = ut + mt; up = int(ut/t*100) if t else 0; mp = int(mt/t*100) if t else 0
-    w = "🔵 Uday Comm Agr" if ut > mt else ("🔴 Maa Vaishno Telecom" if mt > ut else "Tie")
-    hdr = "⚖️ Distributor Comparison (AAJ)" if today_only else f"⚖️ Distributor Comparison (last {days} days)"
-    return f"{hdr}\n\n🔵 Uday Comm Agr: {ut} ({up}%)\n🔴 Maa Vaishno: {mt} ({mp}%)\n\n🏆 Winner: {w}"
 
 def perf_alert(h=None, mi=None):
-    s = get_settings(); tu = s.get("target_day_uday", 0); tm = s.get("target_day_mv", 0)
+    s = get_settings()
+    tu = s.get("target_day_uday", 0)
+    tm = s.get("target_day_mv", 0)
     if not tu and not tm: return "❌ Koi daily target set nahi."
     now = datetime.now()
     if h is not None:
@@ -415,34 +483,48 @@ def perf_alert(h=None, mi=None):
         r = reps[0]; lbl = "latest"
     p = r.get("parsed") or parse_mnp(r.get("text", ""))
     if not p: return "❌ Report parse nahi ho paayi."
-    u = p["distributors"].get("Uday Comm Agr", {}).get("total", 0); m = p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
+    u = p["distributors"].get("Uday Comm Agr", {}).get("total", 0)
+    m = p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
+    tds = today_str(); yds = yest_str()
     al = []; ex = []
     if tu:
         if u < tu:
             g = tu - u; pct = int(u/tu*100)
             al.append(f"🔵 Uday Comm Agr: {u}/{tu} ({pct}%) - gap {g}")
-            if s.get("last_fail_uday") == yest_str(): ex.append("❗ Uday Comm Agr - aap aaj bhi target pura nahi kar paye!")
-            upd_setting("last_fail_uday", today_str())
+            if s.get("last_fail_uday") == yds: ex.append("❗ Uday Comm Agr - aap aaj bhi target pura nahi kar paye!")
+            upd_setting("last_fail_uday", tds)
         else: upd_setting("last_fail_uday", "")
     if tm:
         if m < tm:
             g = tm - m; pct = int(m/tm*100)
-            al.append(f"🔴 Maa Vaishno Telecom: {m}/{tm} ({pct}%) - gap {g}")
-            if s.get("last_fail_mv") == yest_str(): ex.append("❗ Maa Vaishno Telecom - aap aaj bhi target pura nahi kar paye!")
-            upd_setting("last_fail_mv", today_str())
+            al.append(f"🔴 Maa Vaishno: {m}/{tm} ({pct}%) - gap {g}")
+            if s.get("last_fail_mv") == yds: ex.append("❗ Maa Vaishno - aap aaj bhi target pura nahi kar paye!")
+            upd_setting("last_fail_mv", tds)
         else: upd_setting("last_fail_mv", "")
     if al:
         msg = f"⚠️ Low Performance Alert ({lbl})\n\n" + "\n".join(al)
         if ex: msg += "\n\n" + "\n".join(ex)
+        if tu and u >= tu: msg += "\n\n✅ Uday Comm Agr ne target pura kar liya!"
+        if tm and m >= tm: msg += "\n✅ Maa Vaishno ne target pura kar liya!"
         return msg
-    return f"✅ Sab targets pura ho gaye ({lbl})\n\n🔵 Uday Comm Agr: {u}/{tu}\n🔴 Maa Vaishno Telecom: {m}/{tm}"
+    return f"✅ Sab targets pura ho gaye ({lbl})\n\n🔵 Uday Comm Agr: {u}/{tu}\n🔴 Maa Vaishno: {m}/{tm}"
 
 def bal_alert(p, th=3):
     if not p: return None
-    low = [{"name": MSISDN_MAP.get(it["msisdn"]), "d": it["stock_days"], "b": it["balance"], "s": it["sale_lakh"]} for it in p.get("items", []) if MSISDN_MAP.get(it["msisdn"]) and it["stock_days"] < th]
+    low = []
+    for it in p.get("items", []):
+        n = MSISDN_MAP.get(it["msisdn"])
+        if not n: continue
+        if it["stock_days"] < th:
+            low.append({"name": n, "d": it["stock_days"], "b": it["balance"], "s": it["sale_lakh"]})
     if not low: return None
     lines = ["🚨 Low Balance Alert", ""]
-    for it in low: lines.append(f"🔸 {it['name']}\n   Stock Days: {it['d']}\n   Balance: {it['b']:,}\n   Sale: {it['s']} Lakh\n")
+    for it in low:
+        lines.append(f"🔸 {it['name']}")
+        lines.append(f"   Stock Days: {it['d']}")
+        lines.append(f"   Balance: {it['b']:,}")
+        lines.append(f"   Sale: {it['s']} Lakh")
+        lines.append("")
     lines.append(f"⚠️ Aapka balance {th} din se kam hai - aaj hi billing karayen!")
     return "\n".join(lines)
 
@@ -454,92 +536,318 @@ def stock_chk(th=3):
     al = bal_alert(p, th)
     if al: return al
     lines = ["✅ Sab distributors ka stock theek hai", ""]
-    for it in p.get("items", []): lines.append(f"🔹 {MSISDN_MAP.get(it['msisdn'], it['msisdn'])}: {it['stock_days']} din")
+    for it in p.get("items", []):
+        n = MSISDN_MAP.get(it["msisdn"], it["msisdn"])
+        lines.append(f"🔹 {n}: {it['stock_days']} din")
     return "\n".join(lines)
 
-def find_rep(dt, h, mi):
-    try:
-        ist_ts = datetime.combine(dt, datetime.min.time().replace(hour=h, minute=mi)).timestamp()
-        ut = ist_ts - IST; s = datetime.combine(dt, datetime.min.time()).timestamp() - IST
-        e = s + 86400
-        reps = list(get_db().find({"timestamp": {"$gte": s, "$lt": e}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", 1))
-        return min(reps, key=lambda r: abs(r["timestamp"] - ut)) if reps else None
-    except: return None
+def projection(period="day"):
+    ws, we = get_wh()
+    now = datetime.now()
+    today = now.date()
+    if period == "day":
+        utc0 = datetime.combine(today, datetime.min.time()).timestamp() - IST
+        reps = list(get_db().find({"timestamp": {"$gte": utc0}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", 1))
+        if not reps:
+            return "⚠️ Aaj koi report nahi aayi."
+        first = datetime.fromtimestamp(reps[0]["timestamp"] + IST)
+        last = datetime.fromtimestamp(reps[-1]["timestamp"] + IST)
+        p = reps[-1].get("parsed") or parse_mnp(reps[-1].get("text", ""))
+        u = p["distributors"].get("Uday Comm Agr", {}).get("total", 0)
+        m = p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
+        t = (p.get("total") or {}).get("total", 0)
+        ch = last.hour + last.minute/60
+        sh = max(first.hour + first.minute/60, ws)
+        el = max(0.5, ch - sh)
+        rem = max(0, we - ch)
+        if rem <= 0:
+            return f"📈 FTD Projection (Aaj ka final - working hours khatam)\n\n🔵 Uday: {u}\n🔴 Maa Vaishno: {m}\n🎯 Total: {t}"
+        pu = int(u/el*(el+rem))
+        pm = int(m/el*(el+rem))
+        pt = int(t/el*(el+rem))
+        return f"📈 FTD Projection\n\nAbhi tak ({last.strftime('%H:%M')}):\n🔵 Uday: {u}\n🔴 Maa Vaishno: {m}\n🎯 Total: {t}\n\nExpected ({int(we)}:00 tak):\n🔵 Uday: ~{pu}\n🔴 Maa Vaishno: ~{pm}\n🎯 Total: ~{pt}"
+    return "❌ Period samjha nahi."
 
+def proj_week():
+    now = datetime.now()
+    today = now.date()
+    mon = today - timedelta(days=today.weekday())
+    um = datetime.combine(mon, datetime.min.time()).timestamp() - IST
+    reps = list(get_db().find({"timestamp": {"$gte": um}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", 1))
+    daily = {}
+    for r in reps:
+        daily[time.strftime("%Y-%m-%d", time.gmtime(r["timestamp"] + IST))] = r
+    u_sofar = 0; m_sofar = 0; dd = 0
+    for r in daily.values():
+        p = parse_mnp(r.get("text", ""))
+        if p:
+            u_sofar += p["distributors"].get("Uday Comm Agr", {}).get("total", 0)
+            m_sofar += p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
+            dd += 1
+    t_sofar = u_sofar + m_sofar
+    rd = 7 - today.weekday() - 1
+    u_avg = int(u_sofar/dd) if dd else 0
+    m_avg = int(m_sofar/dd) if dd else 0
+    u_exp = int(u_sofar + u_avg * rd)
+    m_exp = int(m_sofar + m_avg * rd)
+    t_exp = u_exp + m_exp
+    lines = ["📊 Weekly Projection", "", f"Abhi tak ({dd} din):", f"🔵 Uday: {u_sofar}", f"🔴 Maa Vaishno: {m_sofar}", f"🎯 Total: {t_sofar}", "", "📊 Daily Avg:", f"🔵 Uday: {u_avg}/din", f"🔴 Maa Vaishno: {m_avg}/din", "", f"📈 Expected ({rd} din baaki):", f"🔵 Uday: ~{u_exp}", f"🔴 Maa Vaishno: ~{m_exp}", f"🎯 Total: ~{t_exp}"]
+    return "\n".join(lines)
+
+def proj_month():
+    now = datetime.now()
+    today = now.date()
+    ms = today.replace(day=1)
+    um = datetime.combine(ms, datetime.min.time()).timestamp() - IST
+    reps = list(get_db().find({"timestamp": {"$gte": um}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", 1))
+    daily = {}
+    for r in reps:
+        daily[time.strftime("%Y-%m-%d", time.gmtime(r["timestamp"] + IST))] = r
+    u_sofar = 0; m_sofar = 0; dd = 0
+    for r in daily.values():
+        p = parse_mnp(r.get("text", ""))
+        if p:
+            u_sofar += p["distributors"].get("Uday Comm Agr", {}).get("total", 0)
+            m_sofar += p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
+            dd += 1
+    t_sofar = u_sofar + m_sofar
+    nm = today.replace(year=today.year+1, month=1, day=1) if today.month == 12 else today.replace(month=today.month+1, day=1)
+    dim = (nm - ms).days
+    rd = dim - today.day
+    u_avg = int(u_sofar/dd) if dd else 0
+    m_avg = int(m_sofar/dd) if dd else 0
+    u_exp = int(u_sofar + u_avg * rd)
+    m_exp = int(m_sofar + m_avg * rd)
+    t_exp = u_exp + m_exp
+    lines = [f"📅 MTD Projection ({ms.strftime('%b %Y')})", "", f"Abhi tak ({dd} din):", f"🔵 Uday: {u_sofar}", f"🔴 Maa Vaishno: {m_sofar}", f"🎯 Total: {t_sofar}", "", "📊 Daily Avg:", f"🔵 Uday: {u_avg}/din", f"🔴 Maa Vaishno: {m_avg}/din", "", f"📈 Expected ({rd} din baaki):", f"🔵 Uday: ~{u_exp}", f"🔴 Maa Vaishno: ~{m_exp}", f"🎯 Total: ~{t_exp}"]
+    return "\n".join(lines)
+
+def day_ach():
+    now = datetime.now()
+    today = now.date()
+    utc0 = datetime.combine(today, datetime.min.time()).timestamp() - IST
+    reps = list(get_db().find({"timestamp": {"$gte": utc0}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", -1).limit(1))
+    if not reps:
+        return "❌ Aaj koi report nahi aayi."
+    p = reps[0].get("parsed") or parse_mnp(reps[0].get("text", ""))
+    if not p:
+        return "❌ Report parse nahi ho paayi."
+    u = p["distributors"].get("Uday Comm Agr", {}).get("total", 0)
+    m = p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
+    t = u + m
+    lines = ["📊 FTD Achievement", ""]
+    lines.append(f"Latest: {reps[0].get('date_str', '')}")
+    lines.append("")
+    lines.append(f"🔵 Uday: {u}")
+    lines.append(f"🔴 Maa Vaishno: {m}")
+    lines.append(f"🎯 Total: {t}")
+    return "\n".join(lines)
+
+def week_ach():
+    now = datetime.now()
+    today = now.date()
+    mon = today - timedelta(days=today.weekday())
+    um = datetime.combine(mon, datetime.min.time()).timestamp() - IST
+    reps = list(get_db().find({"timestamp": {"$gte": um}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", 1))
+    daily = {}
+    for r in reps:
+        daily[time.strftime("%Y-%m-%d", time.gmtime(r["timestamp"] + IST))] = r
+    u_sofar = 0; m_sofar = 0; dd = 0
+    for r in daily.values():
+        p = parse_mnp(r.get("text", ""))
+        if p:
+            u_sofar += p["distributors"].get("Uday Comm Agr", {}).get("total", 0)
+            m_sofar += p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
+            dd += 1
+    t_sofar = u_sofar + m_sofar
+    return f"📊 Weekly Achievement\n\nAbhi tak ({dd} din):\n🔵 Uday: {u_sofar}\n🔴 Maa Vaishno: {m_sofar}\n🎯 Total: {t_sofar}"
+
+def month_ach():
+    now = datetime.now()
+    today = now.date()
+    ms = today.replace(day=1)
+    um = datetime.combine(ms, datetime.min.time()).timestamp() - IST
+    reps = list(get_db().find({"timestamp": {"$gte": um}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", 1))
+    daily = {}
+    for r in reps:
+        daily[time.strftime("%Y-%m-%d", time.gmtime(r["timestamp"] + IST))] = r
+    u_sofar = 0; m_sofar = 0; dd = 0
+    for r in daily.values():
+        p = parse_mnp(r.get("text", ""))
+        if p:
+            u_sofar += p["distributors"].get("Uday Comm Agr", {}).get("total", 0)
+            m_sofar += p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
+            dd += 1
+    t_sofar = u_sofar + m_sofar
+    u_avg = int(u_sofar/dd) if dd else 0
+    m_avg = int(m_sofar/dd) if dd else 0
+    lines = [f"📅 MTD Achievement ({ms.strftime('%b %Y')})", "", f"Abhi tak ({dd} din):", f"🔵 Uday: {u_sofar}", f"🔴 Maa Vaishno: {m_sofar}", f"🎯 Total: {t_sofar}", "", "📊 Current Daily Avg (CRR):", f"🔵 Uday: {u_avg} MNP/din", f"🔴 Maa Vaishno: {m_avg} MNP/din"]
+    mt_u = get_target("uday", "month")
+    mt_m = get_target("mv", "month")
+    if mt_u or mt_m:
+        lines.append("")
+        lines.append("🎯 Month Target:")
+        if mt_u: lines.append(f"🔵 Uday: {mt_u}")
+        if mt_m: lines.append(f"🔴 Maa Vaishno: {mt_m}")
+        lines.append("")
+        lines.append("⚖️ Target vs Achievement:")
+        if mt_u:
+            pct = int(u_sofar/mt_u*100); diff = u_sofar - mt_u
+            mark = f"❌ gap {-diff}" if diff < 0 else f"✅ +{diff}"
+            lines.append(f"🔵 Uday: {u_sofar}/{mt_u} ({pct}%) — {mark}")
+        if mt_m:
+            pct = int(m_sofar/mt_m*100); diff = m_sofar - mt_m
+            mark = f"❌ gap {-diff}" if diff < 0 else f"✅ +{diff}"
+            lines.append(f"🔴 Maa Vaishno: {m_sofar}/{mt_m} ({pct}%) — {mark}")
+        if mt_u and mt_m:
+            tot_t = mt_u + mt_m
+            pct = int(t_sofar/tot_t*100); diff = t_sofar - tot_t
+            mark = f"❌ gap {-diff}" if diff < 0 else f"✅ +{diff}"
+            lines.append("")
+            lines.append(f"📌 Overall: {t_sofar}/{tot_t} ({pct}%) — {mark}")
+    return "\n".join(lines)
+
+def crr_rrr_month():
+    now = datetime.now()
+    today = now.date()
+    ms = today.replace(day=1)
+    if today.month == 12: nm = today.replace(year=today.year+1, month=1, day=1)
+    else: nm = today.replace(month=today.month+1, day=1)
+    total_days_m = (nm - ms).days
+    days_passed = today.day
+    days_left_m = total_days_m - days_passed
     
-MON = {"jan":1,"feb":2,"mar":3,"apr":4,"may":5,"jun":6,"jul":7,"aug":8,"sep":9,"oct":10,"nov":11,"dec":12}
+    um = datetime.combine(ms, datetime.min.time()).timestamp() - IST
+    reps_m = list(get_db().find({"timestamp": {"$gte": um}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", 1))
+    u_sofar_m = 0; m_sofar_m = 0
+    for r in reps_m:
+        p = parse_mnp(r.get("text", ""))
+        if p:
+            u_sofar_m += p["distributors"].get("Uday Comm Agr", {}).get("total", 0)
+            m_sofar_m += p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
+            
+    mt_u = get_target("uday", "month")
+    mt_m = get_target("mv", "month")
+    
+    lines = ["📊 Required Run Rate (CRR & RRR)", "", f"📅 MTD Target Analysis ({days_left_m} din baaki):"]
+    total_gap_m = 0
+    total_sofar = u_sofar_m + m_sofar_m
+    
+    if mt_u:
+        gap_u = mt_u - u_sofar_m
+        crr_u = int(u_sofar_m / days_passed) if days_passed > 0 else 0
+        if gap_u > 0:
+            rrr_u = int(gap_u / days_left_m)
+            if gap_u % days_left_m != 0: rrr_u += 1
+            lines.append(f"🔵 Uday: gap {gap_u}")
+            lines.append(f"   ⚡ CRR: {crr_u} MNP/din")
+            lines.append(f"   🎯 RRR: {rrr_u} MNP/din")
+            total_gap_m += gap_u
+        else:
+            lines.append(f"🔵 Uday: ✅ Target Pura (CRR: {crr_u} MNP/din)")
+            
+    lines.append("")
+    
+    if mt_m:
+        gap_m = mt_m - m_sofar_m
+        crr_m = int(m_sofar_m / days_passed) if days_passed > 0 else 0
+        if gap_m > 0:
+            rrr_m = int(gap_m / days_left_m)
+            if gap_m % days_left_m != 0: rrr_m += 1
+            lines.append(f"🔴 Maa Vaishno: gap {gap_m}")
+            lines.append(f"   ⚡ CRR: {crr_m} MNP/din")
+            lines.append(f"   🎯 RRR: {rrr_m} MNP/din")
+            total_gap_m += gap_m
+        else:
+            lines.append(f"🔴 Maa Vaishno: ✅ Target Pura (CRR: {crr_m} MNP/din)")
+            
+    lines.append("")
+    
+    if total_gap_m > 0:
+        tot_mt = mt_u + mt_m
+        crr_t = int(total_sofar / days_passed) if days_passed > 0 else 0
+        rrr_t = int(total_gap_m / days_left_m)
+        if total_gap_m % days_left_m != 0: rrr_t += 1
+        
+        lines.append(f"🎯 Overall Gap: {total_gap_m}")
+        lines.append(f"   ⚡ CRR (Total): {crr_t} MNP/din")
+        lines.append(f"   🎯 RRR (Total): {rrr_t} MNP/din")
+        lines.append("")
+        lines.append("⚠️ Alert: Target time pe pura karne ke liye daily RRR drive karein!!")
+        
+    return "\n".join(lines)
 
-def ampm(t, i, h):
-    if h >= 13: return h
-    if h == 12: return 0 if re.search(r'raat|night', t[max(0,i-20):i+30]) else 12
-    c = t[max(0,i-20):i+30]
-    if re.search(r'subah|subha|morning|\bam\b', c): return h
-    if re.search(r'dophar|dopahar|afternoon', c): return h+12 if h<12 else h
-    if re.search(r'shaam|sham|evening', c): return h+12 if h<12 else h
-    if re.search(r'raat|night|\bpm\b', c): return h+12 if h<12 else h
-    return h
-
-def ext_time(t):
-    L = t.lower()
-    m = re.search(r'(\d{1,2})[:\.](\d{2})', L)
-    if m: return ampm(L, m.start(), int(m.group(1))), int(m.group(2))
-    m = re.search(r'(\d{1,2})\s*(?:baje|bje|pm|am|bajkar)', L)
-    if m: return ampm(L, m.start(), int(m.group(1))), 0
-    return None
-
-def ext_date(t):
-    L = t.lower(); td = datetime.now().date()
-    if re.search(r'\bkal\b', L) or "yesterday" in L: return td - timedelta(days=1)
-    if re.search(r'\baaj\b', L) or "today" in L or "abhi" in L: return td
-    if re.search(r'\bparso\b', L): return td - timedelta(days=2)
-    m = re.search(r'(\d{1,2})\s*(?:st|nd|rd|th)?\s*([a-z]+)', L)
-    if m and m.group(2) in MON:
-        try:
-            c = datetime(td.year, MON[m.group(2)], int(m.group(1))).date()
-            if c > td: c = datetime(td.year-1, MON[m.group(2)], int(m.group(1))).date()
-            return c
-        except: pass
-    return None
+def dist_cmp(days=7, today_only=False):
+    if today_only: days = 1
+    d = daily_data(days)
+    ut = sum(d["uday"])
+    mt = sum(d["mv"])
+    if ut == 0 and mt == 0:
+        return "❌ Koi data nahi."
+    t = ut + mt
+    up = int(ut/t*100) if t else 0
+    mp = int(mt/t*100) if t else 0
+    w = "🔵 Uday Comm Agr" if ut > mt else ("🔴 Maa Vaishno Telecom" if mt > ut else "Tie")
+    hdr = "⚖️ Distributor Comparison (AAJ)" if today_only else f"⚖️ Distributor Comparison (last {days} days)"
+    return f"{hdr}\n\n🔵 Uday Comm Agr: {ut} ({up}%)\n🔴 Maa Vaishno: {mt} ({mp}%)\n\n🏆 Winner: {w}"
 
 @app.route('/run-scheduled', methods=['GET'])
 def run_scheduled():
     try:
-        now = datetime.now(); today = now.strftime("%Y-%m-%d"); sent_count = 0
+        now = datetime.now()
+        today = now.strftime("%Y-%m-%d")
+        sent_count = 0
         for doc in get_all_scheduled():
-            key = doc["_id"].replace("sched_", ""); target = doc.get("target", "sr")
-            msg_time = doc.get("time", ""); sched_type = doc.get("type", "daily")
-            last_sent = doc.get("last_sent", ""); specific_gid = doc.get("specific_gid")
+            key = doc["_id"].replace("sched_", "")
+            target = doc.get("target", "sr")
+            msg_time = doc.get("time", "")
+            sched_type = doc.get("type", "daily")
+            last_sent = doc.get("last_sent", "")
+            specific_gid = doc.get("specific_gid")
+            
             if not msg_time or last_sent == today: continue
             if sched_type == "once":
                 sched_date = doc.get("date", "")
                 if sched_date and sched_date != today: continue
+                
             try:
                 th, tm = msg_time.split(":")
                 msg_dt = now.replace(hour=int(th), minute=int(tm), second=0, microsecond=0)
             except: continue
+            
             diff = (now - msg_dt).total_seconds() / 60
             if diff < 0: continue
+            
             if diff > 15:
                 mark_sent(key, today)
                 if sched_type == "once": get_db().delete_one({"_id": doc["_id"]})
                 continue
+                
             try:
                 if target == "mnp": bot.send_message(int(GROUP_CHAT_ID), doc["message"])
                 else: send_to_sr_groups(doc["message"], specific_gid)
                 sent_count += 1
             except Exception as e: print(f"Send error: {e}")
+            
             mark_sent(key, today)
             if sched_type == "once": get_db().delete_one({"_id": doc["_id"]})
+            
         return f"Sent {sent_count} messages.", 200
     except Exception as e: return "Error: " + str(e), 500
 
 @app.route('/daily-quote', methods=['GET'])
 def daily_quote():
     try:
-        bot.send_message(GROUP_CHAT_ID, "🌅 Good Morning Team"); time.sleep(1)
-        today = datetime.now().strftime("%d %B %Y"); day_name = datetime.now().strftime("%A")
+        bot.send_message(GROUP_CHAT_ID, "🌅 Good Morning Team")
+        time.sleep(1)
+        today = datetime.now().strftime("%d %B %Y")
+        day_name = datetime.now().strftime("%A")
         theme = random.choice(MOTIVATION_THEMES)
-        r = client.chat.completions.create(messages=[{"role": "system", "content": "You are a creative Hindi motivational writer. Write ONLY in Devanagari script. Write exactly 2-3 lines. NO greeting, NO author name, NO English words, NO theme mention. Every message must be UNIQUE and FRESH."}, {"role": "user", "content": f"Aaj {day_name}, {today} hai. Theme: {theme}. Ek BILKUL NAYA 2-3 line ka motivational message likho."}], model="openai/gpt-oss-20b")
+        r = client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": "You are a creative Hindi motivational writer. Write ONLY in Devanagari script. Write exactly 2-3 lines. NO greeting, NO author name, NO English words, NO theme mention. Every message must be UNIQUE and FRESH."},
+                {"role": "user", "content": f"Aaj {day_name}, {today} hai. Theme: {theme}. Ek BILKUL NAYA 2-3 line ka motivational message likho."}
+            ], model="openai/gpt-oss-20b")
         bot.send_message(GROUP_CHAT_ID, "💪 " + r.choices[0].message.content.strip())
         return "Sent", 200
     except Exception as e: return "Error: " + str(e), 500
@@ -548,67 +856,109 @@ def daily_quote():
 def chk_perf():
     try:
         t = perf_alert()
-        if t.startswith("❌") or t.startswith("⚠️"): bot.send_message(GROUP_CHAT_ID, t); return "No action", 200
+        if t.startswith("❌") or t.startswith("⚠️"): 
+            bot.send_message(GROUP_CHAT_ID, t)
+            return "No action", 200
         if "Sab targets pura" in t: return "All targets achieved", 200
-        bot.send_message(GROUP_CHAT_ID, t); return "Alert sent", 200
+        bot.send_message(GROUP_CHAT_ID, t)
+        return "Alert sent", 200
+    except Exception as e: return "Error: " + str(e), 500
+
+@app.route('/weekly-summary', methods=['GET'])
+def weekly_ep():
+    try:
+        bot.send_message(GROUP_CHAT_ID, weekly_sum())
+        return "Sent", 200
+    except Exception as e: return "Error: " + str(e), 500
+
+@app.route('/save-report', methods=['POST'])
+def save_ep():
+    try:
+        data = request.get_json(force=True, silent=True) or request.form.to_dict()
+        txt = data.get("text", "").strip()
+        if not txt: return "No text", 400
+        save_mnp(txt, time.time())
+        return "Saved", 200
     except Exception as e: return "Error: " + str(e), 500
 
 @app.route('/noon-check', methods=['GET'])
 def noon_check():
     try:
-        s = get_settings(); tu = s.get("target_day_uday", 0); tm = s.get("target_day_mv", 0)
-        today = datetime.now().date(); utc0 = datetime.combine(today, datetime.min.time()).timestamp() - IST
+        s = get_settings()
+        tu = s.get("target_day_uday", 0)
+        tm = s.get("target_day_mv", 0)
+        today = datetime.now().date()
+        utc0 = datetime.combine(today, datetime.min.time()).timestamp() - IST
         reps = list(get_db().find({"timestamp": {"$gte": utc0}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", -1).limit(1))
         u = 0; m = 0
         if reps:
             p = reps[0].get("parsed") or parse_mnp(reps[0].get("text", ""))
-            if p: u = p["distributors"].get("Uday Comm Agr", {}).get("total", 0); m = p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
-        bot.send_message(GROUP_CHAT_ID, f"☀️ 12 PM Reminder\n\nAbhi aadha din baaki hai — speed badaiye!!\nAaj ka target miss nahi karna hai.\n\n🔵 Uday: {u}/{tu}\n🔴 Maa Vaishno: {m}/{tm}")
+            if p:
+                u = p["distributors"].get("Uday Comm Agr", {}).get("total", 0)
+                m = p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
+        msg = f"☀️ 12 PM Reminder\n\nAbhi aadha din baaki hai — speed badaiye!!\nAaj ka target miss nahi karna hai.\n\n🔵 Uday: {u}/{tu}\n🔴 Maa Vaishno: {m}/{tm}"
+        bot.send_message(GROUP_CHAT_ID, msg)
         return "Sent", 200
     except Exception as e: return "Error: " + str(e), 500
 
 @app.route('/peak-alert', methods=['GET'])
 def peak_alert():
     try:
-        s = get_settings(); tu = s.get("target_day_uday", 0); tm = s.get("target_day_mv", 0)
-        today = datetime.now().date(); utc0 = datetime.combine(today, datetime.min.time()).timestamp() - IST
+        s = get_settings()
+        tu = s.get("target_day_uday", 0)
+        tm = s.get("target_day_mv", 0)
+        today = datetime.now().date()
+        utc0 = datetime.combine(today, datetime.min.time()).timestamp() - IST
         reps = list(get_db().find({"timestamp": {"$gte": utc0}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", -1).limit(1))
         u = 0; m = 0
         if reps:
             p = reps[0].get("parsed") or parse_mnp(reps[0].get("text", ""))
-            if p: u = p["distributors"].get("Uday Comm Agr", {}).get("total", 0); m = p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
-        bot.send_message(GROUP_CHAT_ID, f"⚡ 4 PM Peak Hours Alert\n\nPuri speed up guys...\n\n🔵 Uday: {u}/{tu}\n🔴 Maa Vaishno: {m}/{tm}")
+            if p:
+                u = p["distributors"].get("Uday Comm Agr", {}).get("total", 0)
+                m = p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
+        msg = f"⚡ 4 PM Peak Hours Alert\n\nPuri speed up guys...\n\n🔵 Uday: {u}/{tu}\n🔴 Maa Vaishno: {m}/{tm}"
+        bot.send_message(GROUP_CHAT_ID, msg)
         return "Sent", 200
     except Exception as e: return "Error: " + str(e), 500
 
 @app.route('/night-summary', methods=['GET'])
 def night_summary():
     try:
-        s = get_settings(); tu = s.get("target_day_uday", 0); tm = s.get("target_day_mv", 0)
-        today = datetime.now().date(); utc0 = datetime.combine(today, datetime.min.time()).timestamp() - IST
+        s = get_settings()
+        tu = s.get("target_day_uday", 0)
+        tm = s.get("target_day_mv", 0)
+        today = datetime.now().date()
+        utc0 = datetime.combine(today, datetime.min.time()).timestamp() - IST
         reps = list(get_db().find({"timestamp": {"$gte": utc0}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", -1).limit(1))
-        if not reps: bot.send_message(GROUP_CHAT_ID, "🌙 Aaj koi report nahi aayi."); return "No report", 200
+        if not reps:
+            bot.send_message(GROUP_CHAT_ID, "🌙 Aaj koi report nahi aayi.")
+            return "No report", 200
         p = reps[0].get("parsed") or parse_mnp(reps[0].get("text", ""))
-        u = p["distributors"].get("Uday Comm Agr", {}).get("total", 0); m = p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0); t = u + m
-        u_mark = "✅" if tu and u >= tu else ("❌ gap " + str(tu - u) if tu else ""); m_mark = "✅" if tm and m >= tm else ("❌ gap " + str(tm - m) if tm else "")
-        bot.send_message(GROUP_CHAT_ID, f"🌙 Aaj ka Final Summary\n\n🔵 Uday: {u}/{tu} {u_mark}\n🔴 Maa Vaishno: {m}/{tm} {m_mark}\n🎯 Total: {t}")
+        u = p["distributors"].get("Uday Comm Agr", {}).get("total", 0)
+        m = p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
+        t = u + m
+        u_mark = "✅" if tu and u >= tu else ("❌ gap " + str(tu - u) if tu else "")
+        m_mark = "✅" if tm and m >= tm else ("❌ gap " + str(tm - m) if tm else "")
+        msg = f"🌙 Aaj ka Final Summary\n\n🔵 Uday: {u}/{tu} {u_mark}\n🔴 Maa Vaishno: {m}/{tm} {m_mark}\n🎯 Total: {t}"
+        bot.send_message(GROUP_CHAT_ID, msg)
         return "Sent", 200
     except Exception as e: return "Error: " + str(e), 500
 
 @app.route('/report-missing', methods=['GET'])
 def report_missing():
     try:
-        now = datetime.now(); hr = now.hour
+        now = datetime.now()
+        hr = now.hour
         if hr < 7 or hr > 21: return "Outside working hours", 200
         cutoff = (now - timedelta(hours=2)).timestamp()
         reps = list(get_db().find({"timestamp": {"$gte": cutoff}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", -1).limit(1))
         if reps: return "Reports on track", 200
         last = list(get_db().find({"text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", -1).limit(1))
         last_time = datetime.fromtimestamp(last[0]["timestamp"] + IST).strftime("%H:%M") if last else "Koi report nahi"
-        bot.send_message(GROUP_CHAT_ID, f"⚠️ Report Missing Alert\n\nPichhle 2 ghante se koi MNP report nahi aayi!\n\nLast report: {last_time}\nAbhi: {now.strftime('%H:%M')}\n\nCheck karo - SMS system ya network issue?")
+        msg = f"⚠️ Report Missing Alert\n\nPichhle 2 ghante se koi MNP report nahi aayi!\n\nLast report: {last_time}\nAbhi: {now.strftime('%H:%M')}\n\nCheck karo - SMS system ya network issue?"
+        bot.send_message(GROUP_CHAT_ID, msg)
         return "Alert sent", 200
     except Exception as e: return "Error: " + str(e), 500
-
 
 @bot.message_handler(func=lambda m: True)
 def handle(message):
@@ -623,6 +973,7 @@ def handle(message):
         is_priv = message.chat.type == "private"
         is_sr_group = chat_id_str in get_sr_groups()
 
+        # ===== USER TRACKING =====
         if not is_sr_group:
             try: add_known_user(uid, un, fname)
             except: pass
@@ -676,7 +1027,7 @@ def handle(message):
         ct = text.replace(BOT_USERNAME, "").strip() or "Hi"
         lo = ct.lower()
 
-        # ===== DM SCHEDULED MESSAGES =====
+        # ===== DM SCHEDULED MESSAGES (Set/List/Del) =====
         if lo.startswith("setmnp ") or lo.startswith("setsr "):
             if not adm: return
             target = "mnp" if lo.startswith("setmnp ") else "sr"
@@ -693,6 +1044,7 @@ def handle(message):
                 msg_text = rem_parts[1].strip()
             else:
                 if len(parts) < 2: return
+                # Specific SR group check
                 if target == "sr" and parts[0].startswith("-"):
                     specific_gid = parts[0].strip()
                     rem_parts = parts[1].split(" ", 1)
@@ -705,7 +1057,7 @@ def handle(message):
 
             if not re.match(r'^\d{1,2}:\d{2}$', time_str): return
             key = save_scheduled(target, time_str, msg_text, sched_type, specific_gid)
-            target_name = "MNP Group" if target == "mnp" else ("SR Specific" if specific_gid else "SR All Groups")
+            target_name = "MNP Group" if target == "mnp" else ("SR Specific Group" if specific_gid else "SR All Groups")
             bot.reply_to(message, f"✅ Saved!\n\n🎯 Target: {target_name}\n⏰ Time: {time_str} ({sched_type})\n📝 Msg: {msg_text}\n🔑 Key: `{key}`\n\nDelete: `delmsg {key}`", parse_mode="Markdown")
             return
 
@@ -729,7 +1081,7 @@ def handle(message):
             bot.reply_to(message, f"✅ Deleted: `{key}`" if res.deleted_count else f"⚠️ Not found: `{key}`", parse_mode="Markdown")
             return
 
-        # ===== OTHER COMMANDS =====
+        # ===== SR GROUP MANAGEMENT =====
         if lo.startswith("sr add "):
             if not adm: return
             gid = lo.replace("sr add ", "").strip()
@@ -751,6 +1103,7 @@ def handle(message):
             bot.reply_to(message, "📋 SR Groups:\n" + "\n".join([f"{i+1}. `{g}`" for i, g in enumerate(groups)]), parse_mode="Markdown")
             return
 
+        # ===== SAVE AS & DELETE =====
         savem = re.search(r'save\s+as\s+(\d{1,2})\s*([a-z]+)\s*(\d{1,2})(?::(\d{2}))?', lo)
         if savem and message.reply_to_message and adm:
             try:
@@ -770,54 +1123,12 @@ def handle(message):
             if last: get_db().delete_one({"_id": last[0]["_id"]}); bot.reply_to(message, "✅ Deleted last report.")
             return
 
-        # ===== RRR COMMAND =====
+        # ===== NEW RRR / CRR COMMAND =====
         if lo.strip() in ["rrr", "crr", "rrr month"]:
-            now = datetime.now(); today = now.date()
-            ms = today.replace(day=1)
-            if today.month == 12: nm = today.replace(year=today.year+1, month=1, day=1)
-            else: nm = today.replace(month=today.month+1, day=1)
-            total_days_m = (nm - ms).days; days_passed = today.day; days_left_m = total_days_m - days_passed
-            
-            um = datetime.combine(ms, datetime.min.time()).timestamp() - IST
-            reps_m = list(get_db().find({"timestamp": {"$gte": um}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", 1))
-            u_sofar_m = 0; m_sofar_m = 0
-            for r in reps_m:
-                p = parse_mnp(r.get("text", ""))
-                if p: u_sofar_m += p["distributors"].get("Uday Comm Agr", {}).get("total", 0); m_sofar_m += p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
-            
-            mt_u = get_target("uday", "month"); mt_m = get_target("mv", "month")
-            lines = ["📊 Required Run Rate (CRR & RRR)", "", f"📅 MTD Target Analysis ({days_left_m} din baaki):"]
-            total_gap_m = 0; total_sofar = u_sofar_m + m_sofar_m
-            
-            if mt_u:
-                gap_u = mt_u - u_sofar_m; crr_u = int(u_sofar_m / days_passed) if days_passed > 0 else 0
-                if gap_u > 0:
-                    rrr_u = int(gap_u / days_left_m); rrr_u += 1 if gap_u % days_left_m != 0 else 0
-                    lines.append(f"🔵 Uday: gap {gap_u}\n   ⚡ CRR: {crr_u} MNP/din\n   🎯 RRR: {rrr_u} MNP/din")
-                    total_gap_m += gap_u
-                else: lines.append(f"🔵 Uday: ✅ Target Pura (CRR: {crr_u} MNP/din)")
-            
-            lines.append("")
-            
-            if mt_m:
-                gap_m = mt_m - m_sofar_m; crr_m = int(m_sofar_m / days_passed) if days_passed > 0 else 0
-                if gap_m > 0:
-                    rrr_m = int(gap_m / days_left_m); rrr_m += 1 if gap_m % days_left_m != 0 else 0
-                    lines.append(f"🔴 Maa Vaishno: gap {gap_m}\n   ⚡ CRR: {crr_m} MNP/din\n   🎯 RRR: {rrr_m} MNP/din")
-                    total_gap_m += gap_m
-                else: lines.append(f"🔴 Maa Vaishno: ✅ Target Pura (CRR: {crr_m} MNP/din)")
-            
-            lines.append("")
-            
-            if total_gap_m > 0:
-                tot_mt = mt_u + mt_m; crr_t = int(total_sofar / days_passed) if days_passed > 0 else 0
-                rrr_t = int(total_gap_m / days_left_m); rrr_t += 1 if total_gap_m % days_left_m != 0 else 0
-                lines.append(f"🎯 Overall Gap: {total_gap_m}\n   ⚡ CRR (Total): {crr_t} MNP/din\n   🎯 RRR (Total): {rrr_t} MNP/din")
-                lines.append(""); lines.append("⚠️ Alert: Target time pe pura karne ke liye daily RRR drive karein!!")
-            
-            bot.reply_to(message, "\n".join(lines))
+            bot.reply_to(message, crr_rrr_month())
             return
 
+        # ===== CHARTS & ANALYTICS (TEXT COMMANDS) =====
         if any(w in lo for w in ["peak hour", "peak time"]):
             bot.reply_to(message, peak_hours(7))
             return
@@ -841,87 +1152,181 @@ def handle(message):
             bot.reply_to(message, stock_chk(3))
             return
 
+        # ===== MENU =====
         if lo.strip() in ["/start", "/menu", "menu", "start"]:
             from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
             kb = InlineKeyboardMarkup(row_width=2)
-            kb.add(InlineKeyboardButton("📊 Graphs", callback_data="menu_graphs"), InlineKeyboardButton("📈 Projection", callback_data="menu_proj"), InlineKeyboardButton("🎯 Performance", callback_data="menu_perf"), InlineKeyboardButton("🚨 Stock Check", callback_data="stock_check"), InlineKeyboardButton("⚖️ Distributors", callback_data="dist_compare"), InlineKeyboardButton("📋 Weekly Summary", callback_data="weekly_summary"))
-            if adm: kb.add(InlineKeyboardButton("📅 Month vs Month", callback_data="mom_compare"), InlineKeyboardButton("🏆 Best/Worst", callback_data="best_worst"), InlineKeyboardButton("📊 Dist Charts", callback_data="menu_dist"), InlineKeyboardButton("🏆 Peak Hours", callback_data="peak_hours"))
+            kb.add(
+                InlineKeyboardButton("📊 Graphs", callback_data="menu_graphs"),
+                InlineKeyboardButton("📈 Projection", callback_data="menu_proj"),
+                InlineKeyboardButton("🎯 Performance", callback_data="menu_perf"),
+                InlineKeyboardButton("🚨 Stock Check", callback_data="stock_check"),
+                InlineKeyboardButton("⚖️ Distributors", callback_data="dist_compare"),
+                InlineKeyboardButton("📋 Weekly Summary", callback_data="weekly_summary")
+            )
+            if adm:
+                kb.add(
+                    InlineKeyboardButton("📅 Month vs Month", callback_data="mom_compare"),
+                    InlineKeyboardButton("🏆 Best/Worst", callback_data="best_worst"),
+                    InlineKeyboardButton("📊 Dist Charts", callback_data="menu_dist"),
+                    InlineKeyboardButton("🏆 Peak Hours", callback_data="peak_hours")
+                )
             bot.reply_to(message, "🤖 DTR Bot Menu", reply_markup=kb)
             return
 
-        # AI FALLBACK
+        # ===== AI FALLBACK =====
         r = client.chat.completions.create(messages=[{"role": "system", "content": "You are a helpful Telegram assistant. Reply in 1-2 lines."}, {"role": "user", "content": ct}], model="openai/gpt-oss-20b")
         bot.reply_to(message, r.choices[0].message.content)
-    except Exception as e: print("Handle Error:", e)
+    except Exception as e: 
+        print("Handle Error:", e)
 
-BTN_MAP = {"graph_bar": "graphs", "graph_line": "graphs", "graph_pie": "graphs", "graph_bar_mtd": "graphs", "graph_line_mtd": "graphs", "graph_pie_mtd": "graphs", "proj_ftd": "projections", "proj_week": "projections", "proj_month": "projections", "perf_ftd": "performance", "perf_week": "performance", "perf_month": "performance", "stock_check": "stock_check", "weekly_summary": "weekly_summary", "dist_compare": "distributors"}
+BTN_MAP = {
+    "graph_bar": "graphs", "graph_line": "graphs", "graph_pie": "graphs",
+    "graph_bar_mtd": "graphs", "graph_line_mtd": "graphs", "graph_pie_mtd": "graphs",
+    "proj_ftd": "projections", "proj_week": "projections", "proj_month": "projections",
+    "perf_ftd": "performance", "perf_week": "performance", "perf_month": "performance",
+    "stock_check": "stock_check", "weekly_summary": "weekly_summary", "dist_compare": "distributors"
+}
 
 @bot.callback_query_handler(func=lambda c: True)
 def cb(call):
     try:
         bot.answer_callback_query(call.id)
-        cid = call.message.chat.id; mid = call.message.message_id; d = call.data; adm = is_admin(call.from_user.id, call.from_user.username)
+        cid = call.message.chat.id
+        mid = call.message.message_id
+        d = call.data
+        adm = is_admin(call.from_user.id, call.from_user.username)
         from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+        # ===== SUBMENU: GRAPHS =====
         if d == "menu_graphs":
             kb = InlineKeyboardMarkup(row_width=3)
-            kb.add(InlineKeyboardButton("📊 Bar", callback_data="graph_bar"), InlineKeyboardButton("📈 Line", callback_data="graph_line"), InlineKeyboardButton("🥧 Pie", callback_data="graph_pie"))
-            kb.add(InlineKeyboardButton("📊 MTD Bar", callback_data="graph_bar_mtd"), InlineKeyboardButton("📈 MTD Line", callback_data="graph_line_mtd"), InlineKeyboardButton("🥧 MTD Pie", callback_data="graph_pie_mtd"))
+            kb.add(
+                InlineKeyboardButton("📊 Bar", callback_data="graph_bar"),
+                InlineKeyboardButton("📈 Line", callback_data="graph_line"),
+                InlineKeyboardButton("🥧 Pie", callback_data="graph_pie")
+            )
+            kb.add(
+                InlineKeyboardButton("📊 MTD Bar", callback_data="graph_bar_mtd"),
+                InlineKeyboardButton("📈 MTD Line", callback_data="graph_line_mtd"),
+                InlineKeyboardButton("🥧 MTD Pie", callback_data="graph_pie_mtd")
+            )
             kb.add(InlineKeyboardButton("🔙 Back", callback_data="menu_main"))
             bot.edit_message_text("📊 Graphs Menu", cid, mid, reply_markup=kb)
             return
+
+        # ===== SUBMENU: PROJECTION =====
         if d == "menu_proj":
             kb = InlineKeyboardMarkup(row_width=1)
-            kb.add(InlineKeyboardButton("📊 FTD (Aaj)", callback_data="proj_ftd"), InlineKeyboardButton("📅 Weekly", callback_data="proj_week"), InlineKeyboardButton("📅 MTD", callback_data="proj_month"), InlineKeyboardButton("🔙 Back", callback_data="menu_main"))
+            kb.add(
+                InlineKeyboardButton("📊 FTD (Aaj)", callback_data="proj_ftd"),
+                InlineKeyboardButton("📅 Weekly", callback_data="proj_week"),
+                InlineKeyboardButton("📅 MTD", callback_data="proj_month"),
+                InlineKeyboardButton("🔙 Back", callback_data="menu_main")
+            )
             bot.edit_message_text("📈 Projection Menu", cid, mid, reply_markup=kb)
             return
+
+        # ===== SUBMENU: PERFORMANCE =====
         if d == "menu_perf":
             kb = InlineKeyboardMarkup(row_width=1)
-            kb.add(InlineKeyboardButton("📊 FTD ACH", callback_data="perf_ftd"), InlineKeyboardButton("📅 Weekly ACH", callback_data="perf_week"), InlineKeyboardButton("📅 MTD ACH", callback_data="perf_month"), InlineKeyboardButton("🔙 Back", callback_data="menu_main"))
+            kb.add(
+                InlineKeyboardButton("📊 FTD ACH", callback_data="perf_ftd"),
+                InlineKeyboardButton("📅 Weekly ACH", callback_data="perf_week"),
+                InlineKeyboardButton("📅 MTD ACH", callback_data="perf_month"),
+                InlineKeyboardButton("🔙 Back", callback_data="menu_main")
+            )
             bot.edit_message_text("🎯 Performance Menu", cid, mid, reply_markup=kb)
             return
+
+        # ===== SUBMENU: DISTRIBUTOR CHARTS =====
         if d == "menu_dist":
             if not adm: bot.send_message(cid, "❌ Sirf admin."); return
             kb = InlineKeyboardMarkup(row_width=3)
             kb.add(InlineKeyboardButton("🔵 UDAY CHARTS", callback_data="noop"))
-            kb.add(InlineKeyboardButton("📊 Bar", callback_data="dist_uday_bar"), InlineKeyboardButton("📈 Line", callback_data="dist_uday_line"), InlineKeyboardButton("🥧 Pie", callback_data="dist_uday_pie"))
-            kb.add(InlineKeyboardButton("🔴 MV CHARTS", callback_data="noop"))
-            kb.add(InlineKeyboardButton("📊 Bar", callback_data="dist_mv_bar"), InlineKeyboardButton("📈 Line", callback_data="dist_mv_line"), InlineKeyboardButton("🥧 Pie", callback_data="dist_mv_pie"))
+            kb.add(
+                InlineKeyboardButton("📊 Bar", callback_data="dist_uday_bar"),
+                InlineKeyboardButton("📈 Line", callback_data="dist_uday_line"),
+                InlineKeyboardButton("🥧 Pie", callback_data="dist_uday_pie")
+            )
+            kb.add(InlineKeyboardButton("🔴 MAA VAISHNO CHARTS", callback_data="noop"))
+            kb.add(
+                InlineKeyboardButton("📊 Bar", callback_data="dist_mv_bar"),
+                InlineKeyboardButton("📈 Line", callback_data="dist_mv_line"),
+                InlineKeyboardButton("🥧 Pie", callback_data="dist_mv_pie")
+            )
             kb.add(InlineKeyboardButton("🔙 Back", callback_data="menu_main"))
             bot.edit_message_text("📊 Distributor Charts", cid, mid, reply_markup=kb)
             return
+
+        # ===== MAIN MENU =====
         if d == "menu_main":
             kb = InlineKeyboardMarkup(row_width=2)
-            kb.add(InlineKeyboardButton("📊 Graphs", callback_data="menu_graphs"), InlineKeyboardButton("📈 Projection", callback_data="menu_proj"), InlineKeyboardButton("🎯 Perf", callback_data="menu_perf"), InlineKeyboardButton("🚨 Stock", callback_data="stock_check"), InlineKeyboardButton("⚖️ Dist", callback_data="dist_compare"), InlineKeyboardButton("📋 Weekly", callback_data="weekly_summary"))
-            if adm: kb.add(InlineKeyboardButton("📅 MOM", callback_data="mom_compare"), InlineKeyboardButton("🏆 Best", callback_data="best_worst"), InlineKeyboardButton("📊 D-Charts", callback_data="menu_dist"), InlineKeyboardButton("🏆 Peak", callback_data="peak_hours"))
+            kb.add(
+                InlineKeyboardButton("📊 Graphs", callback_data="menu_graphs"),
+                InlineKeyboardButton("📈 Projection", callback_data="menu_proj"),
+                InlineKeyboardButton("🎯 Performance", callback_data="menu_perf"),
+                InlineKeyboardButton("🚨 Stock Check", callback_data="stock_check"),
+                InlineKeyboardButton("⚖️ Distributors", callback_data="dist_compare"),
+                InlineKeyboardButton("📋 Weekly Summary", callback_data="weekly_summary")
+            )
+            if adm:
+                kb.add(
+                    InlineKeyboardButton("📅 Month vs Month", callback_data="mom_compare"),
+                    InlineKeyboardButton("🏆 Best/Worst", callback_data="best_worst"),
+                    InlineKeyboardButton("📊 Dist Charts", callback_data="menu_dist"),
+                    InlineKeyboardButton("🏆 Peak Hours", callback_data="peak_hours")
+                )
             bot.edit_message_text("🤖 Main Menu", cid, mid, reply_markup=kb)
             return
+
         if d == "noop": return
 
+        # ===== RRR / CRR BUTTON HANDLE =====
+        if d == "show_rrr":
+            bot.send_message(cid, crr_rrr_month())
+            return
+
+        # ===== CHARTS BUTTONS =====
         if d and d.startswith("dist_"):
             if not adm: return
             parts = d.replace("dist_", "").split("_")
             bot.send_photo(cid, dist_chart(parts[0], parts[1], 7))
             return
 
+        # ===== OTHER BUTTONS =====
         if d == "graph_bar": bot.send_photo(cid, bar_chart(7))
         elif d == "graph_pie": bot.send_photo(cid, pie_chart(7))
         elif d == "graph_line": bot.send_photo(cid, line_chart(7))
         elif d == "graph_bar_mtd": bot.send_photo(cid, bar_chart(mtd=True))
+        elif d == "graph_pie_mtd": bot.send_photo(cid, pie_chart(mtd=True))
+        elif d == "graph_line_mtd": bot.send_photo(cid, line_chart(mtd=True))
+        
         elif d == "proj_ftd": bot.send_message(cid, projection("day"))
         elif d == "proj_week": bot.send_message(cid, proj_week())
         elif d == "proj_month": bot.send_message(cid, proj_month())
+        
         elif d == "perf_ftd": bot.send_message(cid, day_ach())
         elif d == "perf_week": bot.send_message(cid, week_ach())
-        elif d == "perf_month": bot.send_message(cid, month_ach())
+        
+        # Naya Logic: MTD ACH bhejo, aur niche CRR & RRR ka button laga do
+        elif d == "perf_month":
+            msg = bot.send_message(cid, month_ach())
+            kb = InlineKeyboardMarkup()
+            kb.add(InlineKeyboardButton("📊 CRR & RRR", callback_data="show_rrr"))
+            bot.edit_message_reply_markup(cid, msg.message_id, reply_markup=kb)
+            return
+            
         elif d == "mom_compare": bot.send_message(cid, mom_compare())
         elif d == "best_worst": bot.send_message(cid, best_worst(30))
         elif d == "stock_check": bot.send_message(cid, stock_chk(3))
         elif d == "weekly_summary": bot.send_message(cid, weekly_sum())
         elif d == "peak_hours": bot.send_message(cid, peak_hours(7))
         elif d == "dist_compare": bot.send_message(cid, dist_cmp(7))
+        
     except Exception as e: print("CB Error:", e)
 
+# ==================== WELCOME MESSAGE ====================
 @bot.message_handler(content_types=['new_chat_members'])
 def welcome_new_member(message):
     try:
@@ -929,24 +1334,28 @@ def welcome_new_member(message):
         for member in message.new_chat_members:
             if member.is_bot: continue
             name = member.first_name or member.username or "Member"
-            text = f"🎉 Welcome to DTR Mainpuri Group!\n\n👋 Hello {name} Sir!\n🤝 Aapka swagat hai!\n\n🤵 Mai hu Akash Sir ka Assistant\n\n📊 Aapki kisi bhi madad ke liye main yahi hoon —\nmujhe bulane ke liye tag karke /menu bhejen"
+            text = f"🎉 Welcome to DTR Mainpuri Group!\n\n👋 Hello {name} Sir!\n🤝 Aapka swagat hai!\n\n🤵 Mai hu Akash Sir ka Vertual Assistant\n\n📊 Aapki kisi bhi madad ke liye main yahi hoon —\nmujhe bulane ke liye tag karke /menu bhejen"
             bot.send_message(message.chat.id, text)
     except Exception as e: print("Welcome error:", e)
 
+# ==================== FLASK ROUTES ====================
 @app.route('/', methods=['POST'])
 @app.route('/api/webhook', methods=['POST'])
 def webhook():
     try:
         u = telebot.types.Update.de_json(request.stream.read().decode('utf-8'))
         bot.process_new_updates([u])
-    except Exception as e: print("WEBHOOK ERROR:", str(e))
+    except Exception as e: 
+        print("WEBHOOK ERROR:", str(e))
     return "OK", 200
 
 @app.route('/', methods=['GET'])
-def index(): return "Bot is running!", 200
+def index(): 
+    return "Bot is running!", 200
 
 @app.route('/test', methods=['GET'])
-def test(): return "Token: " + ("SET" if BOT_TOKEN else "MISSING") + ", Groq: " + ("SET" if GROQ_KEY else "MISSING") + ", DB: " + ("SET" if MONGO_URL else "MISSING")
+def test(): 
+    return "Token: " + ("SET" if BOT_TOKEN else "MISSING") + ", Groq: " + ("SET" if GROQ_KEY else "MISSING") + ", DB: " + ("SET" if MONGO_URL else "MISSING")
 
 application = app
 handler = app
