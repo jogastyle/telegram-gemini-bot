@@ -80,6 +80,36 @@ def sr_ai_enabled():
 def set_sr_ai(state):
     upd_setting("sr_ai_enabled", state)
 
+def set_custom_msg(key, msg):
+    get_db().update_one({"_id": f"msg_{key}"}, {"$set": {"text": msg, "updated": time.time()}}, upsert=True)
+
+def get_custom_msg(key, default=""):
+    doc = get_db().find_one({"_id": f"msg_{key}"})
+    return doc["text"] if doc else default
+
+import uuid as _uuid
+
+def save_scheduled(target, time_str, msg, sched_type="daily"):
+    key = f"{target}_{time_str.replace(':','')}_{_uuid.uuid4().hex[:4]}"
+    doc = {
+        "_id": f"sched_{key}",
+        "target": target,
+        "time": time_str,
+        "message": msg,
+        "type": sched_type,
+        "date": datetime.now().strftime("%Y-%m-%d"),
+        "last_sent": "",
+        "created": time.time()
+    }
+    get_db().insert_one(doc)
+    return key
+
+def get_all_scheduled():
+    return list(get_db().find({"_id": {"$regex": "^sched_"}}))
+
+def mark_sent(key, date_str):
+    get_db().update_one({"_id": f"sched_{key}"}, {"$set": {"last_sent": date_str}})
+                        
 def send_to_sr_groups(msg):
     for gid in get_sr_groups():
         try:
@@ -1057,12 +1087,44 @@ def dist_cmp(days=7, today_only=False):
     hdr = "⚖️ Distributor Comparison (AAJ)" if today_only else f"⚖️ Distributor Comparison (last {days} days)"
     return "\n".join([hdr, "", f"🔵 Uday Comm Agr: {ut} ({up}%)", f"   Avg: {ua}/din | Best: {d['labels'][ubi]} ({max(d['uday'])})", "", f"🔴 Maa Vaishno: {mt} ({mp}%)", f"   Avg: {ma}/din | Best: {d['labels'][mbi]} ({max(d['mv'])})", "", f"🏆 Winner: {w}"])
 
+def set_custom_msg(key, msg):
+    get_db().update_one({"_id": f"msg_{key}"}, {"$set": {"text": msg, "updated": time.time()}}, upsert=True)
+
+def get_custom_msg(key, default=""):
+    doc = get_db().find_one({"_id": f"msg_{key}"})
+    return doc["text"] if doc else default
+
+import uuid as _uuid
+
+def save_scheduled(target, time_str, msg, sched_type="daily"):
+    key = f"{target}_{time_str.replace(':','')}_{_uuid.uuid4().hex[:4]}"
+    doc = {
+        "_id": f"sched_{key}",
+        "target": target,
+        "time": time_str,
+        "message": msg,
+        "type": sched_type,
+        "date": datetime.now().strftime("%Y-%m-%d"),
+        "last_sent": "",
+        "created": time.time()
+    }
+    get_db().insert_one(doc)
+    return key
+
+def get_all_scheduled():
+    return list(get_db().find({"_id": {"$regex": "^sched_"}}))
+
+def mark_sent(key, date_str):
+    get_db().update_one({"_id": f"sched_{key}"}, {"$set": {"last_sent": date_str}})
+
 
 # ==================== SR ENDPOINTS ====================
 @app.route('/sr-10am', methods=['GET'])
 def sr_10am():
     try:
-        send_to_sr_groups("📋 Aaj ki open SR report download karli??\n\nKitni SR hai??\n\nNahi kari to abhi karo!!")
+        default_msg = "📋 Aaj ki open SR report download karli??\n\nKitni SR hai??\n\nNahi kari to abhi karo!!"
+        msg = get_custom_msg("sr_10am", default_msg)
+        send_to_sr_groups(msg)
         return "Sent", 200
     except Exception as e:
         return "Error: " + str(e), 500
@@ -1070,7 +1132,9 @@ def sr_10am():
 @app.route('/sr-2pm', methods=['GET'])
 def sr_2pm():
     try:
-        send_to_sr_groups("⏰ Aaj ki panding SR Close ho gi??\n\nAgar nahi to 5 bje se pahle close karo or final data bhejo!!")
+        default_msg = "⏰ Aaj ki panding SR Close ho gi??\n\nAgar nahi to 5 bje se pahle close karo or final data bhejo!!"
+        msg = get_custom_msg("sr_2pm", default_msg)
+        send_to_sr_groups(msg)
         return "Sent", 200
     except Exception as e:
         return "Error: " + str(e), 500
@@ -1078,8 +1142,54 @@ def sr_2pm():
 @app.route('/sr-5pm', methods=['GET'])
 def sr_5pm():
     try:
-        send_to_sr_groups("🚨 Sari SR complete ho gi??\n\nKoi ZI to panding nhi hai?\n\nAgar nahi to remark bhejo!!")
+        default_msg = "🚨 Sari SR complete ho gi??\n\nKoi ZI to panding nhi hai?\n\nAgar nahi to remark bhejo!!"
+        msg = get_custom_msg("sr_5pm", default_msg)
+        send_to_sr_groups(msg)
         return "Sent", 200
+    except Exception as e:
+        return "Error: " + str(e), 500
+
+@app.route('/run-scheduled', methods=['GET'])
+def run_scheduled():
+    try:
+        now = datetime.now()
+        today = now.strftime("%Y-%m-%d")
+        sent_count = 0
+        for doc in get_all_scheduled():
+            key = doc["_id"].replace("sched_", "")
+            target = doc.get("target", "sr")
+            msg_time = doc.get("time", "")
+            sched_type = doc.get("type", "daily")
+            last_sent = doc.get("last_sent", "")
+            if not msg_time: continue
+            if last_sent == today: continue
+            if sched_type == "once":
+                sched_date = doc.get("date", "")
+                if sched_date and sched_date != today: continue
+            try:
+                th, tm = msg_time.split(":")
+                msg_dt = now.replace(hour=int(th), minute=int(tm), second=0, microsecond=0)
+            except:
+                continue
+            diff = (now - msg_dt).total_seconds() / 60
+            if diff < 0: continue
+            if diff > 15:
+                mark_sent(key, today)
+                if sched_type == "once":
+                    get_db().delete_one({"_id": doc["_id"]})
+                continue
+            try:
+                if target == "mnp":
+                    bot.send_message(int(GROUP_CHAT_ID), doc["message"])
+                else:
+                    send_to_sr_groups(doc["message"])
+                sent_count += 1
+            except Exception as e:
+                print(f"Send error: {e}")
+            mark_sent(key, today)
+            if sched_type == "once":
+                get_db().delete_one({"_id": doc["_id"]})
+        return f"Checked. Sent {sent_count} messages.", 200
     except Exception as e:
         return "Error: " + str(e), 500
 
@@ -1349,6 +1459,78 @@ def handle(message):
         lo = ct.lower()
 
         # ===== SR GROUP MANAGEMENT (Admin Only) =====
+        # ===== SCHEDULED MESSAGES (Admin Only) =====
+if lo.startswith("setmnp ") or lo.startswith("setsr "):
+    if not adm:
+        bot.reply_to(message, "❌ Sirf admin.")
+        return
+    target = "mnp" if lo.startswith("setmnp ") else "sr"
+    cmd_len = len("setmnp ") if target == "mnp" else len("setsr ")
+    rest = text[cmd_len:].strip()
+    parts = rest.split(" ", 1)
+    sched_type = "daily"
+    if parts and parts[0].lower() == "once":
+        sched_type = "once"
+        if len(parts) < 2:
+            bot.reply_to(message, "❌ Format: `setX once HH:MM message`", parse_mode="Markdown")
+            return
+        parts2 = parts[1].split(" ", 1)
+        if len(parts2) < 2:
+            bot.reply_to(message, "❌ Format: `setX once HH:MM message`", parse_mode="Markdown")
+            return
+        time_str = parts2[0].strip()
+        msg_text = parts2[1].strip()
+    else:
+        if len(parts) < 2:
+            bot.reply_to(message, f"❌ Format: `set{target} HH:MM message`", parse_mode="Markdown")
+            return
+        time_str = parts[0].strip()
+        msg_text = parts[1].strip()
+    if not re.match(r'^\d{1,2}:\d{2}$', time_str):
+        bot.reply_to(message, "❌ Time format: `HH:MM` (e.g., 09:30)", parse_mode="Markdown")
+        return
+    key = save_scheduled(target, time_str, msg_text, sched_type)
+    target_name = "MNP Group" if target == "mnp" else "SR Groups"
+    reply = (
+        f"✅ Saved!\n\n"
+        f"🎯 Target: {target_name}\n"
+        f"⏰ Time: {time_str} ({sched_type})\n"
+        f"📝 Message: {msg_text}\n"
+        f"🔑 Key: `{key}`\n\n"
+        f"Delete: `delmsg {key}`"
+    )
+    bot.reply_to(message, reply, parse_mode="Markdown")
+    return
+
+if lo.strip() in ["listmsgs", "schedlist", "scheduled"]:
+    if not adm:
+        return
+    all_msgs = get_all_scheduled()
+    if not all_msgs:
+        bot.reply_to(message, "❌ Koi scheduled message nahi hai.")
+        return
+    lines = [f"📋 Scheduled Messages ({len(all_msgs)})", ""]
+    for doc in all_msgs:
+        k = doc["_id"].replace("sched_", "")
+        tg = "MNP" if doc.get("target") == "mnp" else "SR"
+        lines.append(f"🔑 `{k}`")
+        lines.append(f"   🎯 {tg} | ⏰ {doc.get('time','')} | {doc.get('type','')}")
+        lines.append(f"   📝 {doc.get('message','')[:50]}")
+        lines.append("")
+    lines.append("Delete: `delmsg <key>`")
+    bot.reply_to(message, "\n".join(lines), parse_mode="Markdown")
+    return
+
+if lo.startswith("delmsg "):
+    if not adm:
+        return
+    key = text.replace("delmsg ", "").replace("/delmsg ", "").strip()
+    res = get_db().delete_one({"_id": f"sched_{key}"})
+    if res.deleted_count > 0:
+        bot.reply_to(message, f"✅ Deleted: `{key}`", parse_mode="Markdown")
+    else:
+        bot.reply_to(message, f"⚠️ Not found: `{key}`", parse_mode="Markdown")
+    return
         if lo.startswith("sr add "):
             if not adm:
                 bot.reply_to(message, "❌ Sirf admin.")
