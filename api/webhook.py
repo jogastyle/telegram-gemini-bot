@@ -131,6 +131,101 @@ def check_perm(key, adm):
         return True
     return PERMS[key][0] if adm else PERMS[key][1]
 
+# ==================== SCHEDULED MESSAGES ====================
+
+def get_sch_state(uid):
+    return get_db().find_one({"_id": f"sch_state_{uid}"})
+
+def set_sch_state(uid, data):
+    get_db().update_one({"_id": f"sch_state_{uid}"}, {"$set": data}, upsert=True)
+
+def clear_sch_state(uid):
+    get_db().delete_one({"_id": f"sch_state_{uid}"})
+
+def _send_to_target(text, target):
+    """Raise on error so scheduler can retry."""
+    sent = 0
+    if target in ("main", "all"):
+        bot.send_message(GROUP_CHAT_ID, text)
+        sent += 1
+    if target in ("sr_all", "all"):
+        for gid in get_sr_groups():
+            bot.send_message(gid, text)
+            sent += 1
+    if target.startswith("sr:"):
+        bot.send_message(target[3:], text)
+        sent += 1
+    if target.startswith("chat:"):
+        gid = target[5:]
+        bot.send_message(int(gid) if gid.lstrip("-").isdigit() else gid, text)
+        sent += 1
+    return sent
+
+def _do_schedule_check():
+    now_ist = datetime.utcnow() + timedelta(seconds=IST)
+    today = now_ist.strftime("%Y-%m-%d")
+    cur_h, cur_m = now_ist.hour, now_ist.minute
+
+    # ---------- ONCE ----------
+    for sch in get_db().find({
+        "type": "scheduled_msg", "active": True,
+        "repeat": "once", "sent": False,
+        "date": {"$lte": today},
+    }):
+        if sch["date"] < today:
+            get_db().update_one(
+                {"_id": sch["_id"]},
+                {"$set": {"sent": True, "missed": True}}
+            )
+            continue
+        due = (cur_h > sch["hour"]) or (cur_h == sch["hour"] and cur_m >= sch["minute"])
+        if not due:
+            continue
+        claimed = get_db().find_one_and_update(
+            {"_id": sch["_id"], "sent": False},
+            {"$set": {"sent": True, "sent_at": time.time()}}
+        )
+        if claimed:
+            try:
+                _send_to_target(claimed["text"], claimed["target"])
+            except Exception as e:
+                print(f"[SCHED] send fail: {e}")
+                retries = claimed.get("retries", 0) + 1
+                upd = {"retries": retries, "error": str(e)[:300]}
+                if retries < 3:
+                    upd["sent"] = False
+                else:
+                    upd["failed"] = True
+                get_db().update_one({"_id": claimed["_id"]}, {"$set": upd})
+
+    # ---------- DAILY ----------
+    for sch in get_db().find({
+        "type": "scheduled_msg", "active": True, "repeat": "daily",
+        "$or": [{"last_sent_date": {"$ne": today}},
+                {"last_sent_date": {"$exists": False}}],
+    }):
+        if sch.get("date", "1970-01-01") > today:
+            continue
+        due = (cur_h > sch["hour"]) or (cur_h == sch["hour"] and cur_m >= sch["minute"])
+        if not due:
+            continue
+        claimed = get_db().find_one_and_update(
+            {"_id": sch["_id"], "last_sent_date": {"$ne": today}},
+            {"$set": {"last_sent_date": today, "last_sent_at": time.time()}}
+        )
+        if claimed:
+            try:
+                _send_to_target(claimed["text"], claimed["target"])
+            except Exception as e:
+                print(f"[SCHED daily] send fail: {e}")
+                retries = claimed.get("retries", 0) + 1
+                upd = {"retries": retries, "error": str(e)[:300]}
+                if retries < 3:
+                    upd["last_sent_date"] = None
+                else:
+                    upd["failed"] = True
+                get_db().update_one({"_id": claimed["_id"]}, {"$set": upd})
+                
 MSISDN_MAP = {"9997389467": "Uday Comm Agr", "7895110381": "Maa Vaishno Telecom"}
 
 app = Flask(__name__)
@@ -1263,6 +1358,16 @@ def cleanup_bad():
         return f"Deleted {deleted} bad entries", 200
     except Exception as e:
         return "Error: " + str(e), 500
+
+@app.route('/run-scheduled', methods=['GET'])
+def run_scheduled_ep():
+    try:
+        _do_schedule_check()
+        return "OK", 200
+    except Exception as e:
+        return "Error: " + str(e), 500
+
+
 @bot.message_handler(func=lambda m: True)
 def handle(message):
     try:
@@ -1347,6 +1452,247 @@ def handle(message):
 
         ct = text.replace(BOT_USERNAME, "").strip() or "Hi"
         lo = ct.lower()
+
+            # ===== SCHEDULE STATE MACHINE (sirf DM + admin) =====
+        if is_priv and adm:
+            st = get_sch_state(uid)
+            if st and st.get("flow") == "schedule":
+                step = st.get("step")
+                data = st.get("data", {})
+
+                if lo.strip() in ["cancel", "band", "stop", "x", "/cancel"]:
+                    clear_sch_state(uid)
+                    bot.reply_to(message, "❌ Schedule cancelled.")
+                    return
+
+                if step == "text":
+                    data["text"] = text.strip()
+                    set_sch_state(uid, {"flow": "schedule", "step": "target", "data": data})
+                    bot.reply_to(message,
+                        "✅ Message saved.\n\n"
+                        "📬 Target?\n"
+                        "• `main` — Main MNP group\n"
+                        "• `sr_all` — saare SR groups\n"
+                        "• `all` — main + saare SR\n"
+                        "• `sr:<group_id>` — specific SR group\n"
+                        "• `chat:<chat_id>` — custom group\n\n"
+                        "(cancel likh ke cancel karo)",
+                        parse_mode="Markdown")
+                    return
+
+                if step == "target":
+                    t = lo.strip()
+                    if t in ("main", "sr_all", "all"):
+                        data["target"] = t
+                    elif t.startswith("sr:"):
+                        gid = t[3:].strip()
+                        if gid in get_sr_groups():
+                            data["target"] = "sr:" + gid
+                        else:
+                            bot.reply_to(message,
+                                f"❌ Ye SR group nahi hai: `{gid}`\n\n"
+                                f"Valid SR groups:\n" +
+                                "\n".join(f"• `sr:{g}`" for g in get_sr_groups()),
+                                parse_mode="Markdown")
+                            return
+                    elif t.startswith("chat:"):
+                        gid = t[5:].strip()
+                        if gid.lstrip("-").isdigit():
+                            data["target"] = "chat:" + gid
+                        else:
+                            bot.reply_to(message, "❌ Chat ID numeric honi chahiye.")
+                            return
+                    else:
+                        bot.reply_to(message, "❌ Invalid target. main / sr_all / all / sr:<gid> / chat:<gid>")
+                        return
+                    set_sch_state(uid, {"flow": "schedule", "step": "time", "data": data})
+                    bot.reply_to(message, "⏰ Time? (24hr IST format, jaise `14:30`)", parse_mode="Markdown")
+                    return
+
+                if step == "time":
+                    m = re.match(r'^(\d{1,2})[:\.](\d{2})$', lo.strip())
+                    if not m:
+                        bot.reply_to(message, "❌ Format: HH:MM (jaise 14:30)")
+                        return
+                    h, mi = int(m.group(1)), int(m.group(2))
+                    if not (0 <= h < 24 and 0 <= mi < 60):
+                        bot.reply_to(message, "❌ Time galat hai.")
+                        return
+                    data["hour"], data["minute"] = h, mi
+                    set_sch_state(uid, {"flow": "schedule", "step": "date", "data": data})
+                    bot.reply_to(message, "📅 Date? (`today` / `tomorrow` / `YYYY-MM-DD`)", parse_mode="Markdown")
+                    return
+
+                if step == "date":
+                    t = lo.strip()
+                    now_ist = datetime.utcnow() + timedelta(seconds=IST)
+                    today_d = now_ist.date()
+                    if t in ("today", "aaj"):
+                        d = today_d
+                    elif t in ("tomorrow", "kal"):
+                        d = today_d + timedelta(days=1)
+                    else:
+                        try:
+                            d = datetime.strptime(t, "%Y-%m-%d").date()
+                        except Exception:
+                            bot.reply_to(message, "❌ Format: today / tomorrow / YYYY-MM-DD")
+                            return
+                        if d < today_d:
+                            bot.reply_to(message, "❌ Past date allowed nahi.")
+                            return
+                    data["date"] = d.strftime("%Y-%m-%d")
+                    set_sch_state(uid, {"flow": "schedule", "step": "repeat", "data": data})
+                    bot.reply_to(message, "🔁 Repeat? (`once` / `daily`)", parse_mode="Markdown")
+                    return
+
+                if step == "repeat":
+                    t = lo.strip()
+                    if t not in ("once", "daily"):
+                        bot.reply_to(message, "❌ `once` ya `daily` likho.", parse_mode="Markdown")
+                        return
+                    data["repeat"] = t
+
+                    now_ist = datetime.utcnow() + timedelta(seconds=IST)
+                    try:
+                        sch_dt = datetime.strptime(data["date"], "%Y-%m-%d").replace(
+                            hour=data["hour"], minute=data["minute"])
+                        if t == "once" and sch_dt < now_ist - timedelta(minutes=1):
+                            bot.reply_to(message,
+                                f"❌ Ye time ({data['hour']:02d}:{data['minute']:02d} {data['date']}) "
+                                f"nikal gaya hai. Naya time/date choose karo.")
+                            set_sch_state(uid, {"flow": "schedule", "step": "time", "data": data})
+                            return
+                    except Exception:
+                        pass
+
+                    set_sch_state(uid, {"flow": "schedule", "step": "confirm", "data": data})
+                    summary = (
+                        "📋 *Schedule Summary*\n\n"
+                        f"📝 *Message:* {data['text'][:150]}\n"
+                        f"📬 *Target:* `{data['target']}`\n"
+                        f"⏰ *Time:* {data['hour']:02d}:{data['minute']:02d} IST\n"
+                        f"📅 *Date:* {data['date']}\n"
+                        f"🔁 *Repeat:* {data['repeat']}\n\n"
+                        "Confirm ke liye `yes` / cancel ke liye `cancel`."
+                    )
+                    bot.reply_to(message, summary, parse_mode="Markdown")
+                    return
+
+                if step == "confirm":
+                    t = lo.strip()
+                    if t in ("yes", "haan", "ha", "ok", "y"):
+                        doc = {
+                            "type": "scheduled_msg",
+                            "text": data["text"],
+                            "target": data["target"],
+                            "hour": data["hour"],
+                            "minute": data["minute"],
+                            "date": data["date"],
+                            "repeat": data["repeat"],
+                            "created_by": uid,
+                            "created_at": time.time(),
+                            "sent": False,
+                            "last_sent_date": None,
+                            "active": True,
+                            "retries": 0,
+                        }
+                        res = get_db().insert_one(doc)
+                        sid = str(res.inserted_id)[-6:]
+                        clear_sch_state(uid)
+                        bot.reply_to(message,
+                            f"✅ *Scheduled!*\nID: `{sid}`\n\n"
+                            f"List dekhne ke liye: `sch list`\n"
+                            f"Delete ke liye: `sch del {sid}`",
+                            parse_mode="Markdown")
+                        return
+                    elif t in ("no", "nahi", "cancel", "n", "x"):
+                        clear_sch_state(uid)
+                        bot.reply_to(message, "❌ Schedule cancelled.")
+                        return
+                    else:
+                        bot.reply_to(message, "❌ `yes` ya `cancel` bhejo.")
+                        return
+
+        # ===== SCHEDULE COMMANDS =====
+        if lo.strip() in ("sch", "/sch", "schedule"):
+            if not is_priv:
+                bot.reply_to(message, "❌ Schedule sirf DM me set karo.")
+                return
+            if not adm:
+                bot.reply_to(message, "❌ Sirf admin ke liye.")
+                return
+            if get_sch_state(uid):
+                bot.reply_to(message, "⚠️ Ek flow pehle se chal raha hai. `cancel` likho ya complete karo.")
+                return
+            set_sch_state(uid, {"flow": "schedule", "step": "text", "data": {}})
+            bot.reply_to(message,
+                "📝 Message text bhejo jo bhejna hai.\n\n"
+                "(cancel likh ke cancel karo)")
+            return
+
+        if lo.strip() in ("sch list", "/sch list", "schedule list"):
+            if not adm:
+                bot.reply_to(message, "❌ Sirf admin ke liye.")
+                return
+            schs = list(get_db().find(
+                {"type": "scheduled_msg", "active": True}
+            ).sort("created_at", -1))
+            if not schs:
+                bot.reply_to(message, "❌ Koi scheduled message nahi.")
+                return
+            lines = [f"📋 *Scheduled Messages* ({len(schs)})\n"]
+            for s in schs:
+                sid = str(s["_id"])[-6:]
+                if s.get("repeat") == "once":
+                    st_icon = "✅" if s.get("sent") else ("❗" if s.get("failed") else "⏳")
+                else:
+                    st_icon = "🔁"
+                lines.append(
+                    f"{st_icon} `{sid}` — {s['hour']:02d}:{s['minute']:02d} {s.get('date','')} "
+                    f"→ `{s.get('target','main')}`"
+                )
+                lines.append(f"   _{s['text'][:60]}_")
+                if s.get("last_sent_date"):
+                    lines.append(f"   Last sent: {s['last_sent_date']}")
+                if s.get("failed"):
+                    lines.append(f"   ❌ Failed: {s.get('error','')[:60]}")
+                lines.append("")
+            bot.reply_to(message, "\n".join(lines), parse_mode="Markdown")
+            return
+
+        if lo.strip().startswith(("sch del ", "/sch del ")):
+            if not adm:
+                bot.reply_to(message, "❌ Sirf admin ke liye.")
+                return
+            sid = lo.strip().split()[-1]
+            found = None
+            for s in get_db().find({"type": "scheduled_msg", "active": True}):
+                if str(s["_id"]).endswith(sid):
+                    found = s
+                    break
+            if not found:
+                bot.reply_to(message, f"❌ ID `{sid}` nahi mila.", parse_mode="Markdown")
+                return
+            get_db().update_one({"_id": found["_id"]}, {"$set": {"active": False}})
+            bot.reply_to(message, f"✅ Deleted schedule `{sid}`.", parse_mode="Markdown")
+            return
+
+        if lo.strip() in ("sch help", "/sch help", "schedule help"):
+            bot.reply_to(message,
+                "📅 *Schedule Help*\n\n"
+                "`sch` — naya message schedule karo\n"
+                "`sch list` — saare schedules dekho\n"
+                "`sch del <id>` — schedule delete karo\n"
+                "`cancel` — current flow cancel\n\n"
+                "*Targets:*\n"
+                "• `main` — MNP main group\n"
+                "• `sr_all` — saare SR groups\n"
+                "• `all` — main + saare SR\n"
+                "• `sr:<gid>` — specific SR group\n"
+                "• `chat:<gid>` — custom chat\n\n"
+                "*Repeat:* `once` / `daily`",
+                parse_mode="Markdown")
+            return
 
         # ===== SR GROUP MANAGEMENT (Admin Only) =====
         if lo.startswith("sr add "):
