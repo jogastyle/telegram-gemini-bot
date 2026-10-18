@@ -131,7 +131,12 @@ def check_perm(key, adm):
         return True
     return PERMS[key][0] if adm else PERMS[key][1]
 
-# ==================== SCHEDULED MESSAGES ====================
+MSISDN_MAP = {"9997389467": "Uday Comm Agr", "7895110381": "Maa Vaishno Telecom"}
+
+app = Flask(__name__)
+
+
+# ==================== SCHEDULED MESSAGES (NEW) ====================
 
 def get_sch_state(uid):
     return get_db().find_one({"_id": f"sch_state_{uid}"})
@@ -162,7 +167,7 @@ def _send_to_target(text, target):
     return sent
 
 def _do_schedule_check():
-    now_ist = datetime.utcnow() + timedelta(seconds=IST)
+    now_ist = datetime.now() + timedelta(seconds=IST)
     today = now_ist.strftime("%Y-%m-%d")
     cur_h, cur_m = now_ist.hour, now_ist.minute
 
@@ -225,15 +230,15 @@ def _do_schedule_check():
                 else:
                     upd["failed"] = True
                 get_db().update_one({"_id": claimed["_id"]}, {"$set": upd})
-                
-MSISDN_MAP = {"9997389467": "Uday Comm Agr", "7895110381": "Maa Vaishno Telecom"}
 
-app = Flask(__name__)
+# ==================== PARSING ====================
 
 DIST_P = re.compile(r'Dist\s+([A-Za-z0-9 &\.\-\']+?)\s*-\s*\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)\s*/\s*\((\d+)\)')
 TOT_P = re.compile(r'^Total\s*-\s*\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)\s*/\s*\((\d+)\)', re.M)
 TIME_P = re.compile(r'till\s+(\d{1,2})[:\.](\d{2})')
 BAL_P = re.compile(r'(\d{10})\s*/\s*(\d+)\s*/\s*(\d+)\s*/\s*([\d\.]+)')
+
+MON = {"jan":1,"feb":2,"mar":3,"apr":4,"may":5,"jun":6,"jul":7,"aug":8,"sep":9,"oct":10,"nov":11,"dec":12}
 
 def parse_mnp(t):
     if not t or ("FTA MNP" not in t and "FTD" not in t):
@@ -380,10 +385,10 @@ def mom_compare():
         f"🎯 Total: {last_total}",
     ]
     if last_total > 0:
-        growth = int((cur_total - last_total) / last_total * 100)
-        arrow = "📈" if growth >= 0 else "📉"
+        growth_val = int((cur_total - last_total) / last_total * 100)
+        arrow = "📈" if growth_val >= 0 else "📉"
         lines.append("")
-        lines.append(f"{arrow} Growth: {'+' if growth >= 0 else ''}{growth}%")
+        lines.append(f"{arrow} Growth: {'+' if growth_val >= 0 else ''}{growth_val}%")
     else:
         lines.append("")
         lines.append("⚠️ Pichhle mahine ka data nahi hai.")
@@ -689,8 +694,6 @@ def monthly_sum():
         lines.append(f"🏆 Best day: {b[0]} ({b[1]})")
         lines.append(f"📉 Lowest: {w[0]} ({w[1]})")
     return "\n".join(lines)
-
-MON = {"jan":1,"feb":2,"mar":3,"apr":4,"may":5,"jun":6,"jul":7,"aug":8,"sep":9,"oct":10,"nov":11,"dec":12}
 
 def ampm(t, i, h):
     if h >= 13: return h
@@ -1121,31 +1124,14 @@ def month_ach():
 
         if gap_u == 0 and gap_m == 0:
             lines.append("")
-            lines.append("🎉 2nd Slab target pura ho gaya — koi gap nahi!")
+            lines.append("🎉 Sab targets pura ho gaye — koi gap nahi!")
 
-        # ===== DISCLAIMER =====
         lines.append("")
-        lines.append("⚠️ Ye ach 59109 ke aadhar par hai — kripya ise final achievement na maane. Final achievement Akash Sir se lein!!")
+        lines.append("⚠️ Ye ach 59109 k aadhar par hai — kripya ise final achievement na maane. Final achievement Akash Sir se lein!!")
     return "\n".join(lines)
 
+
 def gap_daily_calc():
-    def send_mtd_with_btn(chat_id, reply_to_msg=None):
-    text = month_ach()
-    mt_u = get_target("uday", "month")
-    mt_m = get_target("mv", "month")
-    if mt_u or mt_m:
-        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-        kb = InlineKeyboardMarkup(row_width=1)
-        kb.add(InlineKeyboardButton("📊 Daily Required as per Gap", callback_data="gap_daily"))
-        if reply_to_msg:
-            bot.reply_to(reply_to_msg, text, reply_markup=kb)
-        else:
-            bot.send_message(chat_id, text, reply_markup=kb)
-    else:
-        if reply_to_msg:
-            bot.reply_to(reply_to_msg, text)
-        else:
-            bot.send_message(chat_id, text)
     now = datetime.now(); today = now.date()
     ms = today.replace(day=1)
     um = datetime.combine(ms, datetime.min.time()).timestamp() - IST
@@ -1191,9 +1177,9 @@ def gap_daily_calc():
 
     if gap_u == 0 and gap_m == 0:
         lines.append("")
-        lines.append("🎉 2nd Slab targets already achieved — koi gap nahi!")
+        lines.append("🎉 Sab targets already achieved — koi gap nahi!")
         lines.append("")
-        lines.append("⚠️ Ye ach 59109 ke aadhar par hai — kripya ise final achievement na maane. Final achievement Akash Sir se lein!!")
+        lines.append("⚠️ Ye ach 59109 k aadhar par hai — kripya ise final achievement na maane. Final achievement Akash Sir se lein!!")
         return "\n".join(lines)
 
     lines.append("")
@@ -1240,10 +1226,28 @@ def gap_daily_calc():
         if gap_m > 0:
             lines.append(f"🔴 Maa Vaishno: {gap_m} aur chahiye")
 
-    # ===== DISCLAIMER =====
     lines.append("")
-    lines.append("⚠️ Ye ach 59109 ke aadhar par hai — kripya ise final achievement na maane. Final achievement Akash Sir se lein!!")
+    lines.append("⚠️ Ye ach 59109 k aadhar par hai — kripya ise final achievement na maane. Final achievement Akash Sir se lein!!")
     return "\n".join(lines)
+
+
+def send_mtd_with_btn(chat_id, reply_to_msg=None):
+    text = month_ach()
+    mt_u = get_target("uday", "month")
+    mt_m = get_target("mv", "month")
+    if mt_u or mt_m:
+        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+        kb = InlineKeyboardMarkup(row_width=1)
+        kb.add(InlineKeyboardButton("📊 Daily Required as per Gap", callback_data="gap_daily"))
+        if reply_to_msg:
+            bot.reply_to(reply_to_msg, text, reply_markup=kb)
+        else:
+            bot.send_message(chat_id, text, reply_markup=kb)
+    else:
+        if reply_to_msg:
+            bot.reply_to(reply_to_msg, text)
+        else:
+            bot.send_message(chat_id, text)
 
 
 def cust_rep(dist, days=7):
@@ -1279,7 +1283,6 @@ def dist_cmp(days=7, today_only=False):
     w = "🔵 Uday Comm Agr" if ut > mt else ("🔴 Maa Vaishno Telecom" if mt > ut else "Tie")
     hdr = "⚖️ Distributor Comparison (AAJ)" if today_only else f"⚖️ Distributor Comparison (last {days} days)"
     return "\n".join([hdr, "", f"🔵 Uday Comm Agr: {ut} ({up}%)", f"   Avg: {ua}/din | Best: {d['labels'][ubi]} ({max(d['uday'])})", "", f"🔴 Maa Vaishno: {mt} ({mp}%)", f"   Avg: {ma}/din | Best: {d['labels'][mbi]} ({max(d['mv'])})", "", f"🏆 Winner: {w}"])
-
 
 # ==================== SR ENDPOINTS ====================
 @app.route('/sr-10am', methods=['GET'])
@@ -1487,6 +1490,8 @@ def cleanup_bad():
     except Exception as e:
         return "Error: " + str(e), 500
 
+
+# ==================== SCHEDULED MESSAGES CRON (NEW) ====================
 @app.route('/run-scheduled', methods=['GET'])
 def run_scheduled_ep():
     try:
@@ -1494,7 +1499,6 @@ def run_scheduled_ep():
         return "OK", 200
     except Exception as e:
         return "Error: " + str(e), 500
-
 
 @bot.message_handler(func=lambda m: True)
 def handle(message):
@@ -1515,9 +1519,8 @@ def handle(message):
             except:
                 pass
 
-        # ===== SR GROUPS LOGIC (sirf tag/reply pe AI reply) =====
+        # ===== SR GROUPS LOGIC =====
         if is_sr_group:
-            # Admin AI toggle
             if adm and text:
                 lo_sr = text.lower().strip()
                 if lo_sr in ["sr ai on", "/sr ai on", "ai on"]:
@@ -1529,7 +1532,6 @@ def handle(message):
                     bot.reply_to(message, "🔇 SR AI reply OFF ho gaya\n\nAb SR groups me koi reply nahi aayega.")
                     return
 
-            # AI ON check
             if sr_ai_enabled() and text:
                 is_tag = BOT_USERNAME.lower() in text.lower()
                 is_reply_to_bot = False
@@ -1538,7 +1540,6 @@ def handle(message):
                     if ru.is_bot and ru.username == BOT_USERNAME.replace("@", ""):
                         is_reply_to_bot = True
 
-                # Sirf tag ya reply pe AI reply
                 if is_tag or is_reply_to_bot:
                     try:
                         clean_text = text.replace(BOT_USERNAME, "").strip() or "Hi"
@@ -1581,14 +1582,14 @@ def handle(message):
         ct = text.replace(BOT_USERNAME, "").strip() or "Hi"
         lo = ct.lower()
 
-            # ===== SCHEDULE STATE MACHINE (sirf DM + admin) =====
+        # ===== SCHEDULE STATE MACHINE (sirf DM + admin) =====
         if is_priv and adm:
             st = get_sch_state(uid)
             if st and st.get("flow") == "schedule":
                 step = st.get("step")
                 data = st.get("data", {})
 
-                if lo.strip() in ["cancel", "band", "stop", "x", "/cancel"]:
+                if lo.strip() in ["cancel", "band", "stop", "/cancel", "/start", "/menu"]:
                     clear_sch_state(uid)
                     bot.reply_to(message, "❌ Schedule cancelled.")
                     return
@@ -1653,7 +1654,7 @@ def handle(message):
 
                 if step == "date":
                     t = lo.strip()
-                    now_ist = datetime.utcnow() + timedelta(seconds=IST)
+                    now_ist = datetime.now() + timedelta(seconds=IST)
                     today_d = now_ist.date()
                     if t in ("today", "aaj"):
                         d = today_d
@@ -1680,7 +1681,7 @@ def handle(message):
                         return
                     data["repeat"] = t
 
-                    now_ist = datetime.utcnow() + timedelta(seconds=IST)
+                    now_ist = datetime.now() + timedelta(seconds=IST)
                     try:
                         sch_dt = datetime.strptime(data["date"], "%Y-%m-%d").replace(
                             hour=data["hour"], minute=data["minute"])
@@ -1939,7 +1940,6 @@ def handle(message):
             bot.reply_to(message, "🤖 DTR Mainpuri Bot Menu\n\nKya dekhna chahte ho?", reply_markup=kb)
             return
 
-
         # ===== DISTRIBUTOR-SPECIFIC CHARTS =====
         dcm = re.search(r'\b(uday|mv|vaishno|maa\s*vaishno)\b.*\b(bar|line|pie)\b', lo)
         if dcm and ("chart" in lo or "graph" in lo or dcm.start() == 0 or lo.strip().startswith(dcm.group(1))):
@@ -1960,20 +1960,17 @@ def handle(message):
                 bot.send_message(message.chat.id, f"Chart error: {str(ge)}")
             return
 
-        # ===== CUSTOM DATE RANGE =====
         if "report" in lo and (" se " in lo or " to " in lo):
             sd, ed = parse_range(lo)
             if sd and ed:
                 bot.reply_to(message, custom_range(sd, ed))
                 return
 
-        # ===== MONTH vs MONTH =====
         if ("month compare" in lo or "mtd vs last" in lo or "mom" in lo or
             ("month" in lo and "compare" in lo)):
             bot.reply_to(message, mom_compare())
             return
 
-        # ===== BEST / WORST =====
         if "best day" in lo or "worst day" in lo or "best/worst" in lo:
             dy = 30
             d = re.search(r'(\d{1,2})\s*(?:din|days)', lo)
@@ -1982,7 +1979,6 @@ def handle(message):
             bot.reply_to(message, best_worst(dy))
             return
 
-        # ===== PEAK HOURS =====
         if any(w in lo for w in ["peak hour", "peak hours", "peak time", "kis time sabse zyada"]):
             if not check_perm("peak_hours", adm):
                 bot.reply_to(message, "❌ Currently disabled.")
@@ -2018,7 +2014,6 @@ def handle(message):
             bot.reply_to(message, peak_hours(dy))
             return
 
-        # ===== WORKING HOURS =====
         whm = re.search(r'working\s*hours?\s*(\d{1,2})(?::(\d{2}))?\s*(?:se|to|-)\s*(\d{1,2})(?::(\d{2}))?', lo)
         if whm and (is_tag or is_priv):
             if not check_perm("working_hours", adm):
@@ -2035,7 +2030,6 @@ def handle(message):
             bot.reply_to(message, f"⏰ Current working hours: {int(a)}:00 se {int(b)}:00")
             return
 
-        # ===== TARGETS =====
         wtm = re.search(r'(uday|mv|maa\s*vaishno|vaishno)\s*week\s*(?:target|tgt)\s*(\d+)', lo)
         if wtm and (is_tag or is_priv):
             if not check_perm("target_set", adm):
@@ -2087,7 +2081,6 @@ def handle(message):
             bot.reply_to(message, "\n".join(lines))
             return
 
-        # ===== STOCK CHECK =====
         if any(w in lo for w in ["stock check", "stock alert", "balance check", "low stock", "stock status"]):
             if not check_perm("stock_check", adm):
                 bot.reply_to(message, "❌ Currently disabled.")
@@ -2108,7 +2101,6 @@ def handle(message):
             bot.reply_to(message, f"✅ Stock alert threshold set: {stm.group(1)} din")
             return
 
-        # ===== GROWTH =====
         if any(w in lo for w in ["growth", "growth rate", "kitne percent badha", "kitna badha", "vikas"]):
             if not check_perm("performance", adm):
                 bot.reply_to(message, "❌ Currently disabled.")
@@ -2119,8 +2111,7 @@ def handle(message):
                 bot.reply_to(message, growth("week"))
             return
 
-        # ===== ACHIEVEMENTS =====
-              if "month" in lo and any(w in lo for w in ["ach", "achievement"]):
+        if "month" in lo and any(w in lo for w in ["ach", "achievement"]):
             if not check_perm("performance", adm):
                 bot.reply_to(message, "❌ Currently disabled.")
                 return
@@ -2148,7 +2139,6 @@ def handle(message):
             bot.reply_to(message, week_ach())
             return
 
-        # ===== CUSTOM REPORTS =====
         cr = re.search(r'(uday|mv|maa\s*vaishno|vaishno)\s*(?:ka\s*)?report', lo)
         if cr:
             if not check_perm("custom_report", adm):
@@ -2161,7 +2151,6 @@ def handle(message):
             bot.reply_to(message, cust_rep(cr.group(1), dy))
             return
 
-        # ===== PROJECTIONS =====
         if any(w in lo for w in ["projection", "prediction", "predict", "forecast", "anuman"]):
             if not check_perm("projections", adm):
                 bot.reply_to(message, "❌ Currently disabled.")
@@ -2184,7 +2173,6 @@ def handle(message):
                 bot.reply_to(message, projection("day"))
             return
 
-        # ===== FTD =====
         if any(w in lo for w in ["ftd", "aaj ka"]):
             if not check_perm("performance", adm):
                 bot.reply_to(message, "❌ Currently disabled.")
@@ -2192,7 +2180,6 @@ def handle(message):
             bot.reply_to(message, day_ach())
             return
 
-        # ===== ACHIEVEMENT ALERT =====
         if any(w in lo for w in ["ach", "achievement", "achiv", "achiev"]):
             if not check_perm("performance", adm):
                 bot.reply_to(message, "❌ Currently disabled.")
@@ -2218,8 +2205,7 @@ def handle(message):
             t = ext_time(lo)
             bot.reply_to(message, perf_alert(t[0], t[1]) if t else perf_alert())
             return
-            
-        # ===== GRAPHS =====
+
         if any(w in lo for w in ["graph", "chart"]):
             if not check_perm("graphs", adm):
                 bot.reply_to(message, "❌ Currently disabled.")
@@ -2262,7 +2248,6 @@ def handle(message):
                     bot.send_message(message.chat.id, f"Graph error ({t}): {str(ge)}")
             return
 
-        # ===== SUMMARIES =====
         if "weekly" in lo or "hafte ka summary" in lo or "hafte ki summary" in lo:
             if not check_perm("weekly_summary", adm):
                 bot.reply_to(message, "❌ Currently disabled.")
@@ -2285,7 +2270,6 @@ def handle(message):
                 pass
             return
 
-        # ===== COMPARE =====
         if any(w in lo for w in ["compare", "farq", "antar", "difference"]):
             if not check_perm("compare", adm):
                 bot.reply_to(message, "❌ Currently disabled.")
@@ -2335,8 +2319,6 @@ def handle(message):
         except:
             pass
 
-
-
 # ==================== WELCOME MESSAGE ====================
 @bot.message_handler(content_types=['new_chat_members'])
 def welcome_new_member(message):
@@ -2368,6 +2350,7 @@ BTN_MAP = {
     "perf_check": "performance", "tgt_status": "target_status",
     "stock_check": "stock_check", "weekly_summary": "weekly_summary",
     "peak_hours": "peak_hours", "dist_compare": "distributors",
+    "gap_daily": "performance",
 }
 
 
@@ -2405,7 +2388,6 @@ def cb(call):
         adm = is_admin(uid, un)
         from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-        # ===== SUBMENU: GRAPHS =====
         if d == "menu_graphs":
             kb = InlineKeyboardMarkup(row_width=3)
             kb.add(
@@ -2425,7 +2407,6 @@ def cb(call):
                 bot.send_message(cid, "📊 Graphs Menu\n\nKaunsa graph chahiye?", reply_markup=kb)
             return
 
-        # ===== SUBMENU: PROJECTION =====
         if d == "menu_proj":
             if not check_perm("projections", adm):
                 bot.send_message(cid, "❌ Currently disabled hai.")
@@ -2443,7 +2424,6 @@ def cb(call):
                 bot.send_message(cid, "📈 Projection Menu", reply_markup=kb)
             return
 
-        # ===== SUBMENU: PERFORMANCE =====
         if d == "menu_perf":
             if not check_perm("performance", adm):
                 bot.send_message(cid, "❌ Currently disabled hai.")
@@ -2461,7 +2441,6 @@ def cb(call):
                 bot.send_message(cid, "🎯 Performance Menu", reply_markup=kb)
             return
 
-        # ===== SUBMENU: DISTRIBUTOR CHARTS (Admin Only) =====
         if d == "menu_dist":
             if not adm:
                 bot.send_message(cid, "❌ Sirf admin ke liye.")
@@ -2499,7 +2478,6 @@ def cb(call):
         if d == "noop":
             return
 
-        # ===== BACK TO MAIN MENU =====
         if d == "menu_main":
             kb = build_main_menu_kb(adm)
             try:
@@ -2508,18 +2486,15 @@ def cb(call):
                 bot.send_message(cid, "🤖 Main Menu\n\nKya dekhna chahte ho?", reply_markup=kb)
             return
 
-        # ===== Admin-only callbacks protection =====
         if d in ["mom_compare", "best_worst", "menu_dist"] and not adm:
             bot.send_message(cid, "❌ Sirf admin ke liye.")
             return
 
-        # ===== Permission check =====
         pk = BTN_MAP.get(d)
         if pk and not check_perm(pk, adm):
             bot.send_message(cid, "❌ Ye feature currently disabled hai.")
             return
 
-        # ===== DISTRIBUTOR CHARTS =====
         if d and d.startswith("dist_") and d != "dist_compare":
             if not adm:
                 bot.send_message(cid, "❌ Sirf admin ke liye.")
@@ -2535,7 +2510,6 @@ def cb(call):
             bot.send_photo(cid, dist_chart(dist, ctype, 7, mtd=mtd))
             return
 
-        # ===== GRAPHS =====
         if d == "graph_bar":
             bot.send_photo(cid, bar_chart(7))
         elif d == "graph_pie":
@@ -2549,7 +2523,6 @@ def cb(call):
         elif d == "graph_line_mtd":
             bot.send_photo(cid, line_chart(mtd=True))
 
-        # ===== PROJECTION =====
         elif d == "proj_ftd":
             bot.send_message(cid, projection("day"))
         elif d == "proj_week":
@@ -2557,7 +2530,6 @@ def cb(call):
         elif d == "proj_month":
             bot.send_message(cid, proj_month())
 
-        # ===== PERFORMANCE =====
         elif d == "perf_ftd":
             bot.send_message(cid, day_ach())
         elif d == "perf_week":
@@ -2569,13 +2541,11 @@ def cb(call):
         elif d == "perf_check":
             bot.send_message(cid, perf_alert())
 
-        # ===== MOM, BEST/WORST =====
         elif d == "mom_compare":
             bot.send_message(cid, mom_compare())
         elif d == "best_worst":
             bot.send_message(cid, best_worst(30))
 
-        # ===== OTHER =====
         elif d == "tgt_status":
             s = get_settings()
             a, b = get_wh()
