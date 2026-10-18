@@ -1108,6 +1108,8 @@ def month_ach():
         if mt_m: lines.append(f"🔴 Maa Vaishno: {mt_m}")
         lines.append("")
         lines.append("⚖️ Target vs Achievement:")
+        gap_u = max(0, mt_u - u_sofar) if mt_u else 0
+        gap_m = max(0, mt_m - m_sofar) if mt_m else 0
         if mt_u:
             pct = int(u_sofar/mt_u*100); diff = u_sofar - mt_u
             mark = f"❌ gap {-diff}" if diff < 0 else f"✅ +{diff}"
@@ -1116,7 +1118,133 @@ def month_ach():
             pct = int(m_sofar/mt_m*100); diff = m_sofar - mt_m
             mark = f"❌ gap {-diff}" if diff < 0 else f"✅ +{diff}"
             lines.append(f"🔴 Maa Vaishno: {m_sofar}/{mt_m} ({pct}%) — {mark}")
+
+        if gap_u == 0 and gap_m == 0:
+            lines.append("")
+            lines.append("🎉 2nd Slab target pura ho gaya — koi gap nahi!")
+
+        # ===== DISCLAIMER =====
+        lines.append("")
+        lines.append("⚠️ Ye ach 59109 ke aadhar par hai — kripya ise final achievement na maane. Final achievement Akash Sir se lein!!")
     return "\n".join(lines)
+
+def gap_daily_calc():
+    def send_mtd_with_btn(chat_id, reply_to_msg=None):
+    text = month_ach()
+    mt_u = get_target("uday", "month")
+    mt_m = get_target("mv", "month")
+    if mt_u or mt_m:
+        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+        kb = InlineKeyboardMarkup(row_width=1)
+        kb.add(InlineKeyboardButton("📊 Daily Required as per Gap", callback_data="gap_daily"))
+        if reply_to_msg:
+            bot.reply_to(reply_to_msg, text, reply_markup=kb)
+        else:
+            bot.send_message(chat_id, text, reply_markup=kb)
+    else:
+        if reply_to_msg:
+            bot.reply_to(reply_to_msg, text)
+        else:
+            bot.send_message(chat_id, text)
+    now = datetime.now(); today = now.date()
+    ms = today.replace(day=1)
+    um = datetime.combine(ms, datetime.min.time()).timestamp() - IST
+    reps = list(get_db().find({"timestamp": {"$gte": um}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", 1))
+    daily = {}
+    for r in reps:
+        daily[time.strftime("%Y-%m-%d", time.gmtime(r["timestamp"] + IST))] = r
+    u_sofar = 0; m_sofar = 0; dd = 0
+    for r in daily.values():
+        p = parse_mnp(r.get("text", ""))
+        if p:
+            u_sofar += p["distributors"].get("Uday Comm Agr", {}).get("total", 0)
+            m_sofar += p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
+            dd += 1
+
+    mt_u = get_target("uday", "month")
+    mt_m = get_target("mv", "month")
+
+    if not mt_u and not mt_m:
+        return "❌ Koi month target set nahi hai.\n\nSet karne ke liye:\n`uday month target 1000`\n`mv month target 800`"
+
+    u_avg = int(u_sofar/dd) if dd else 0
+    m_avg = int(m_sofar/dd) if dd else 0
+
+    gap_u = max(0, mt_u - u_sofar) if mt_u else 0
+    gap_m = max(0, mt_m - m_sofar) if mt_m else 0
+
+    next_month = (ms.replace(day=28) + timedelta(days=4)).replace(day=1)
+    days_in_month = (next_month - ms).days
+    remaining_days = days_in_month - today.day
+
+    lines = [f"🎯 Daily Required as per Gap", f"📅 {ms.strftime('%b %Y')}", ""]
+
+    lines.append("⚖️ Target vs Achievement:")
+    if mt_u:
+        pct = int(u_sofar/mt_u*100) if mt_u else 0
+        gap_mark = f"gap {gap_u} ❌" if gap_u > 0 else "✅ achieved"
+        lines.append(f"🔵 Uday: {u_sofar}/{mt_u} ({pct}%) — {gap_mark}")
+    if mt_m:
+        pct = int(m_sofar/mt_m*100) if mt_m else 0
+        gap_mark = f"gap {gap_m} ❌" if gap_m > 0 else "✅ achieved"
+        lines.append(f"🔴 Maa Vaishno: {m_sofar}/{mt_m} ({pct}%) — {gap_mark}")
+
+    if gap_u == 0 and gap_m == 0:
+        lines.append("")
+        lines.append("🎉 2nd Slab targets already achieved — koi gap nahi!")
+        lines.append("")
+        lines.append("⚠️ Ye ach 59109 ke aadhar par hai — kripya ise final achievement na maane. Final achievement Akash Sir se lein!!")
+        return "\n".join(lines)
+
+    lines.append("")
+    if remaining_days > 0:
+        end_date = next_month - timedelta(days=1)
+        start_remain = today + timedelta(days=1)
+        lines.append(f"📅 Bache Hue Din: {remaining_days} ({start_remain.strftime('%d %b')} - {end_date.strftime('%d %b')})")
+        lines.append("")
+        lines.append("📈 Daily Required (gap pura karne ke liye):")
+        lines.append("")
+        total_req = 0
+        if gap_u > 0:
+            req_u = gap_u / remaining_days
+            req_u_str = f"{req_u:.0f}" if req_u == int(req_u) else f"{req_u:.1f}"
+            extra_u = req_u - u_avg
+            lines.append("🔵 Uday Comm Agr:")
+            lines.append(f"   {gap_u} ÷ {remaining_days} = ~{req_u_str}/din")
+            lines.append(f"   Current: {u_avg}/din")
+            if extra_u > 0:
+                extra_str = f"{extra_u:.0f}" if extra_u == int(extra_u) else f"{extra_u:.1f}"
+                lines.append(f"   → +{extra_str}/din extra push chahiye")
+            lines.append("")
+            total_req += req_u
+        if gap_m > 0:
+            req_m = gap_m / remaining_days
+            req_m_str = f"{req_m:.0f}" if req_m == int(req_m) else f"{req_m:.1f}"
+            extra_m = req_m - m_avg
+            lines.append("🔴 Maa Vaishno Telecom:")
+            lines.append(f"   {gap_m} ÷ {remaining_days} = ~{req_m_str}/din")
+            lines.append(f"   Current: {m_avg}/din")
+            if extra_m > 0:
+                extra_str = f"{extra_m:.0f}" if extra_m == int(extra_m) else f"{extra_m:.1f}"
+                lines.append(f"   → +{extra_str}/din extra push chahiye")
+            lines.append("")
+            total_req += req_m
+        total_req_str = f"{total_req:.0f}" if total_req == int(total_req) else f"{total_req:.1f}"
+        lines.append(f"🎯 Total Required: ~{total_req_str}/din")
+    else:
+        lines.append("📅 Aaj Month ka Last Day Hai")
+        lines.append("")
+        lines.append("🎯 Aaj Hi Gap Pura Karna Hai:")
+        if gap_u > 0:
+            lines.append(f"🔵 Uday: {gap_u} aur chahiye")
+        if gap_m > 0:
+            lines.append(f"🔴 Maa Vaishno: {gap_m} aur chahiye")
+
+    # ===== DISCLAIMER =====
+    lines.append("")
+    lines.append("⚠️ Ye ach 59109 ke aadhar par hai — kripya ise final achievement na maane. Final achievement Akash Sir se lein!!")
+    return "\n".join(lines)
+
 
 def cust_rep(dist, days=7):
     d = daily_data(days)
@@ -1992,18 +2120,18 @@ def handle(message):
             return
 
         # ===== ACHIEVEMENTS =====
-        if "month" in lo and any(w in lo for w in ["ach", "achievement"]):
+              if "month" in lo and any(w in lo for w in ["ach", "achievement"]):
             if not check_perm("performance", adm):
                 bot.reply_to(message, "❌ Currently disabled.")
                 return
-            bot.reply_to(message, month_ach())
+            send_mtd_with_btn(message.chat.id, reply_to_msg=message)
             return
 
         if "mahine" in lo and any(w in lo for w in ["ach", "achievement", "performance"]):
             if not check_perm("performance", adm):
                 bot.reply_to(message, "❌ Currently disabled.")
                 return
-            bot.reply_to(message, month_ach())
+            send_mtd_with_btn(message.chat.id, reply_to_msg=message)
             return
 
         if "week" in lo and any(w in lo for w in ["ach", "achievement"]):
@@ -2435,7 +2563,9 @@ def cb(call):
         elif d == "perf_week":
             bot.send_message(cid, week_ach())
         elif d == "perf_month":
-            bot.send_message(cid, month_ach())
+            send_mtd_with_btn(cid)
+        elif d == "gap_daily":
+            bot.send_message(cid, gap_daily_calc())
         elif d == "perf_check":
             bot.send_message(cid, perf_alert())
 
