@@ -3,10 +3,14 @@ from datetime import datetime, timedelta
 from groq import Groq
 from pymongo import MongoClient
 from flask import Flask, request
+from openai import OpenAI # NAYA
+import base64 # NAYA
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 GROQ_KEY = os.environ.get("GROQ_KEY")
 MONGO_URL = os.environ.get("MONGO_URL")
+OPENROUTER_KEY = os.environ.get("OPENROUTER_KEY") # NAYA
+
 GROUP_CHAT_ID = "-1004368616206"
 DEFAULT_SR_GROUPS = ["-5276657355", "-5578221329", "-5474470195", "-5327059513"]
 BOT_USERNAME = "@DTR_Mainpuri_Bot"
@@ -36,6 +40,13 @@ MOTIVATION_THEMES = [
 
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 client = Groq(api_key=GROQ_KEY)
+
+# NAYA: OpenRouter Client for Vision
+client_openrouter = OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=OPENROUTER_KEY
+) if OPENROUTER_KEY else None
+
 _db = None
 
 def get_db():
@@ -134,7 +145,6 @@ def check_perm(key, adm):
 MSISDN_MAP = {"9997389467": "Uday Comm Agr", "7895110381": "Maa Vaishno Telecom"}
 
 app = Flask(__name__)
-
 
 # ==================== SCHEDULED MESSAGES (NEW) ====================
 
@@ -537,7 +547,7 @@ def dist_chart(dist, ctype="bar", days=7, mtd=False):
             "formatter": "function(v){return v;}"}}}}
     return qc(cfg)
 
-def peak_hours(days=7):
+    def peak_hours(days=7):
     now = datetime.now()
     ws_h = 7
     we_h = 21
@@ -1284,221 +1294,90 @@ def dist_cmp(days=7, today_only=False):
     hdr = "⚖️ Distributor Comparison (AAJ)" if today_only else f"⚖️ Distributor Comparison (last {days} days)"
     return "\n".join([hdr, "", f"🔵 Uday Comm Agr: {ut} ({up}%)", f"   Avg: {ua}/din | Best: {d['labels'][ubi]} ({max(d['uday'])})", "", f"🔴 Maa Vaishno: {mt} ({mp}%)", f"   Avg: {ma}/din | Best: {d['labels'][mbi]} ({max(d['mv'])})", "", f"🏆 Winner: {w}"])
 
-# ==================== SR ENDPOINTS ====================
-@app.route('/sr-10am', methods=['GET'])
-def sr_10am():
-    try:
-        send_to_sr_groups("📋 Aaj ki open SR report download karli??\n\nKitni SR hai??\n\nNahi kari to abhi karo!!")
-        return "Sent", 200
-    except Exception as e:
-        return "Error: " + str(e), 500
+# ==================== AI VISION (PHOTO REPORT) ====================
 
-@app.route('/sr-2pm', methods=['GET'])
-def sr_2pm():
-    try:
-        send_to_sr_groups("⏰ Aaj ki panding SR Close ho gi??\n\nAgar nahi to 5 bje se pahle close karo or final data bhejo!!")
-        return "Sent", 200
-    except Exception as e:
-        return "Error: " + str(e), 500
+def encode_image(image_path):
+    with open(image_path, "rb") as image_file:
+        return base64.b64encode(image_file.read()).decode('utf-8')
 
-@app.route('/sr-5pm', methods=['GET'])
-def sr_5pm():
+@bot.message_handler(content_types=['photo'])
+def handle_photo(message):
     try:
-        send_to_sr_groups("🚨 Sari SR complete ho gi??\n\nKoi ZI to panding nhi hai?\n\nAgar nahi to remark bhejo!!")
-        return "Sent", 200
-    except Exception as e:
-        return "Error: " + str(e), 500
+        is_priv = message.chat.type == "private"
+        caption = message.caption or ""
+        is_tag = BOT_USERNAME.lower() in caption.lower()
+        
+        if not is_priv and not is_tag:
+            return 
 
-@app.route('/check-performance', methods=['GET'])
-def chk_perf():
-    try:
-        t = perf_alert()
-        if t.startswith("❌") or t.startswith("⚠️"):
-            bot.send_message(GROUP_CHAT_ID, t)
-            return "No action", 200
-        if "Sab targets pura" in t:
-            return "All targets achieved", 200
-        bot.send_message(GROUP_CHAT_ID, t)
-        return "Alert sent", 200
-    except Exception as e:
-        return "Error: " + str(e), 500
+        user_prompt = caption.replace(BOT_USERNAME, "").strip()
+        if not user_prompt:
+            user_prompt = "Distributor wise 4G PIPO % nikaalo. Jiska 100% se kam hai usko strict warning do."
 
-@app.route('/daily-quote', methods=['GET'])
-def daily_quote():
-    try:
-        bot.send_message(GROUP_CHAT_ID, "🌅 Good Morning Team")
-        time.sleep(1)
-        today = datetime.now().strftime("%d %B %Y")
-        day_name = datetime.now().strftime("%A")
-        theme = random.choice(MOTIVATION_THEMES)
-        r = client.chat.completions.create(
+        status_msg = bot.reply_to(message, "🤖 AI report ko padh raha hai, please wait...")
+        
+        file_info = bot.get_file(message.photo[-1].file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
+        file_path = "temp_report.jpg"
+        with open(file_path, 'wb') as new_file:
+            new_file.write(downloaded_file)
+
+        base64_image = encode_image(file_path)
+
+        system_prompt = """
+        Tum ek strict aur analytical Sales Manager ho. 
+        Image mein di gayi report ko dhyan se padho. Yeh 4G PIPO ki report hai.
+        
+        Calculation Logic (Step-by-step karein):
+        1. Distributor ka naam nikaalo (Channel Name).
+        2. Current 4G PIPO % nikaalo (4G PIPO section ke andar jo %MTD PIP likha hai).
+        3. Current 4G MTD nikaalo (4G PIPO ke andar MTD column).
+        4. Target MTD = Current 4G MTD / (Current 4G PIPO % / 100).
+        5. Total Gap = Target MTD - Current 4G MTD.
+        6. User ke caption se "Din" (Days) nikaalo (agar nahi likha toh 1 din maan lo).
+        7. Daily Extra Required = Total Gap / Days.
+        8. Current Daily Average = Current 4G MTD / 16 (Report ki date 16 hai, isliye 16 se divide karein).
+        9. Total Daily Target = Current Daily Average + Daily Extra Required.
+
+        Output Format (Hinglish mein, short aur punchy):
+        - Distributor ka naam.
+        - Abhi ka PIPO % aur MTD.
+        - 100% ke liye Total Gap (kitne numbers chahiye).
+        - Agar [Days] din mein karna hai, toh unko apne current daily average ke UPAR rozana extra [Daily Extra Required] numbers karne padenge.
+        - Total rozana target [Total Daily Target] numbers ka hoga.
+        - Ek strict warning: 'Aapka PIPO kam hai, competition aage nikal jayega, turant plan banaiye!'
+        """
+
+        if not client_openrouter:
+            bot.reply_to(message, "❌ OpenRouter API Key nahi mili. Environment variables check karein.")
+            return
+
+        completion = client_openrouter.chat.completions.create(
+            model="qwen/qwen-2.5-vl-72b-instruct:free",
             messages=[
-                {"role": "system", "content": "You are a creative Hindi motivational writer. Write ONLY in Devanagari script. Write exactly 2-3 lines. NO greeting, NO author name, NO English words, NO theme mention. Every message must be UNIQUE and FRESH - never repeat previous lines. Be creative."},
-                {"role": "user", "content": f"Aaj {day_name}, {today} hai. Theme: {theme}. Is theme par ek BILKUL NAYA 2-3 line ka motivational message likho jo pehle kabhi use na hua ho. Koi purani line repeat mat karna. Fresh and unique message do."}
-            ], model="openai/gpt-oss-20b")
-        bot.send_message(GROUP_CHAT_ID, "💪 " + r.choices[0].message.content.strip())
-        return "Sent", 200
-    except Exception as e:
-        return "Error: " + str(e), 500
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": [
+                    {"type": "text", "text": user_prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                ]}
+            ],
+            temperature=0.1,
+            max_tokens=1024
+        )
 
-@app.route('/weekly-summary', methods=['GET'])
-def weekly_ep():
-    try:
-        bot.send_message(GROUP_CHAT_ID, weekly_sum())
-        return "Sent", 200
-    except Exception as e:
-        return "Error: " + str(e), 500
+        ai_response = completion.choices[0].message.content
 
-@app.route('/save-report', methods=['POST'])
-def save_ep():
-    try:
-        data = request.get_json(force=True, silent=True) or request.form.to_dict()
-        txt = data.get("text", "").strip()
-        if not txt:
-            return "No text", 400
-        save_mnp(txt, time.time())
-        return "Saved", 200
-    except Exception as e:
-        return "Error: " + str(e), 500
+        bot.delete_message(message.chat.id, status_msg.message_id)
+        bot.reply_to(message, f"📊 **Manager's Analysis:**\n\n{ai_response}", parse_mode="Markdown")
 
-@app.route('/noon-check', methods=['GET'])
-def noon_check():
-    try:
-        s = get_settings()
-        tu = s.get("target_day_uday", 0)
-        tm = s.get("target_day_mv", 0)
-        today = datetime.now().date()
-        utc0 = datetime.combine(today, datetime.min.time()).timestamp() - IST
-        reps = list(get_db().find({"timestamp": {"$gte": utc0}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", -1).limit(1))
-        u = 0; m = 0
-        if reps:
-            p = reps[0].get("parsed") or parse_mnp(reps[0].get("text", ""))
-            if p:
-                u = p["distributors"].get("Uday Comm Agr", {}).get("total", 0)
-                m = p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
-        msg = "☀️ 12 PM Reminder\n\nAbhi aadha din baaki hai — speed badaiye!!\nAaj ka target miss nahi karna hai.\n\n"
-        msg += f"🔵 Uday: {u}/{tu}\n🔴 Maa Vaishno: {m}/{tm}"
-        bot.send_message(GROUP_CHAT_ID, msg)
-        return "Sent", 200
     except Exception as e:
-        return "Error: " + str(e), 500
-
-@app.route('/peak-alert', methods=['GET'])
-def peak_alert():
-    try:
-        s = get_settings()
-        tu = s.get("target_day_uday", 0)
-        tm = s.get("target_day_mv", 0)
-        today = datetime.now().date()
-        utc0 = datetime.combine(today, datetime.min.time()).timestamp() - IST
-        reps = list(get_db().find({"timestamp": {"$gte": utc0}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", -1).limit(1))
-        u = 0; m = 0
-        if reps:
-            p = reps[0].get("parsed") or parse_mnp(reps[0].get("text", ""))
-            if p:
-                u = p["distributors"].get("Uday Comm Agr", {}).get("total", 0)
-                m = p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
-        msg = "⚡ 4 PM Peak Hours Alert\n\nPuri speed up guys...\n\n"
-        msg += f"🔵 Uday: {u}/{tu}\n🔴 Maa Vaishno: {m}/{tm}"
-        bot.send_message(GROUP_CHAT_ID, msg)
-        return "Sent", 200
-    except Exception as e:
-        return "Error: " + str(e), 500
-
-@app.route('/night-summary', methods=['GET'])
-def night_summary():
-    try:
-        s = get_settings()
-        tu = s.get("target_day_uday", 0)
-        tm = s.get("target_day_mv", 0)
-        today = datetime.now().date()
-        utc0 = datetime.combine(today, datetime.min.time()).timestamp() - IST
-        reps = list(get_db().find({"timestamp": {"$gte": utc0}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", -1).limit(1))
-        if not reps:
-            bot.send_message(GROUP_CHAT_ID, "🌙 Aaj koi report nahi aayi.")
-            return "No report", 200
-        p = reps[0].get("parsed") or parse_mnp(reps[0].get("text", ""))
-        u = p["distributors"].get("Uday Comm Agr", {}).get("total", 0)
-        m = p["distributors"].get("Maa Vaishno Telecom", {}).get("total", 0)
-        t = u + m
-        lines = ["🌙 Aaj ka Final Summary", ""]
-        u_mark = "✅" if tu and u >= tu else ("❌ gap " + str(tu - u) if tu else "")
-        m_mark = "✅" if tm and m >= tm else ("❌ gap " + str(tm - m) if tm else "")
-        lines.append(f"🔵 Uday: {u}/{tu} {u_mark}")
-        lines.append(f"🔴 Maa Vaishno: {m}/{tm} {m_mark}")
-        lines.append(f"🎯 Total: {t}")
-        bot.send_message(GROUP_CHAT_ID, "\n".join(lines))
-        return "Sent", 200
-    except Exception as e:
-        return "Error: " + str(e), 500
-
-@app.route('/report-missing', methods=['GET'])
-def report_missing():
-    try:
-        now = datetime.now()
-        hr = now.hour
-        if hr < 7 or hr > 21:
-            return "Outside working hours", 200
-        cutoff = (now - timedelta(hours=2)).timestamp()
-        reps = list(get_db().find({"timestamp": {"$gte": cutoff}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", -1).limit(1))
-        if reps:
-            return "Reports on track", 200
-        last = list(get_db().find({"text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", -1).limit(1))
-        last_time = "Koi report nahi"
-        if last:
-            last_time = datetime.fromtimestamp(last[0]["timestamp"] + IST).strftime("%H:%M")
-        msg = "⚠️ Report Missing Alert\n\nPichhle 2 ghante se koi MNP report nahi aayi!\n\n"
-        msg += f"Last report: {last_time}\nAbhi: {now.strftime('%H:%M')}\n\n"
-        msg += "Check karo - SMS system ya network issue?"
-        bot.send_message(GROUP_CHAT_ID, msg)
-        return "Alert sent", 200
-    except Exception as e:
-        return "Error: " + str(e), 500
-
-@app.route('/debug-ftd', methods=['GET'])
-def debug_ftd():
-    try:
-        now = datetime.now()
-        today = now.date()
-        utc0 = datetime.combine(today, datetime.min.time()).timestamp() - IST
-        reps = list(get_db().find({"timestamp": {"$gte": utc0}, "text": {"$regex": "FTA MNP|FTD"}}).sort("timestamp", 1))
-        out = [f"Reports found: {len(reps)}", ""]
-        for r in reps[-2:]:
-            out.append(f"Time: {r.get('date_str', '?')}")
-            out.append(f"Text: {r.get('text', '')[:300]}")
-            parsed = r.get('parsed') or {}
-            out.append(f"Distributors: {list(parsed.get('distributors', {}).keys())}")
-            out.append(f"Total: {parsed.get('total')}")
-            out.append("---")
-        return "<pre>" + "\n".join(out) + "</pre>", 200
-    except Exception as e:
-        return "Error: " + str(e), 500
-
-@app.route('/cleanup-bad', methods=['GET'])
-def cleanup_bad():
-    try:
-        db = get_db()
-        all_reps = list(db.find({}))
-        deleted = 0
-        for r in all_reps:
-            text = r.get("text", "")
-            if "FTD" in text and "FTA MNP" not in text:
-                if not parse_mnp(text):
-                    db.delete_one({"_id": r["_id"]})
-                    deleted += 1
-        return f"Deleted {deleted} bad entries", 200
-    except Exception as e:
-        return "Error: " + str(e), 500
-
-
-# ==================== SCHEDULED MESSAGES CRON (NEW) ====================
-@app.route('/run-scheduled', methods=['GET'])
-def run_scheduled_ep():
-    try:
-        _do_schedule_check()
-        return "OK", 200
-    except Exception as e:
-        return "Error: " + str(e), 500
+        try:
+            bot.reply_to(message, f"❌ Error aaya: {str(e)}")
+        except:
+            pass
+    finally:
+        if os.path.exists("temp_report.jpg"):
+            os.remove("temp_report.jpg")
 
 @bot.message_handler(func=lambda m: True)
 def handle(message):
